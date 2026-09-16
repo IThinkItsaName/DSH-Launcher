@@ -104,6 +104,7 @@ public sealed class InstanceVersionSwitchService
         NodeRuntimeInfo nodeRuntime,
         bool allowDownload,
         ManagerInstance? instance = null,
+        DshDownloadSource downloadSource = DshDownloadSource.Official,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -140,11 +141,11 @@ public sealed class InstanceVersionSwitchService
                 throw new InvalidOperationException("缺少可用的 Node.js，无法下载所选 DSh 版本。 ");
             }
 
-            progress?.Report($"本机没有 DSh {version}，正在从官方 npm 包下载…");
+            progress?.Report($"本机没有 DSh {version}，正在从{DshInstallService.DisplayNameFor(downloadSource)}下载…");
             var install = await _installer.InstallVersionAsync(
                 nodeRuntime,
                 version,
-                DshInstallService.OfficialRegistry,
+                DshInstallService.RegistryFor(downloadSource),
                 versionDirectory,
                 cancellationToken);
             if (!install.IsSuccess)

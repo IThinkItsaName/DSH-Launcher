@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using DshLauncher.Models;
 
 namespace DshLauncher;
 
@@ -9,11 +10,15 @@ public partial class NewVersionWindow : Window
     public NewVersionWindow(
         Window? owner,
         IReadOnlyList<string> versions,
-        string defaultVersion)
+        string defaultVersion,
+        DshDownloadSource defaultDownloadSource = DshDownloadSource.Official)
     {
         InitializeComponent();
         Owner = owner;
         _defaultVersion = defaultVersion?.Trim() ?? string.Empty;
+        DownloadSourceBox.Items.Add("npm 官方源（registry.npmjs.org）");
+        DownloadSourceBox.Items.Add("npmmirror 国内镜像（registry.npmmirror.com）");
+        DownloadSourceBox.SelectedIndex = defaultDownloadSource == DshDownloadSource.ChinaMirror ? 1 : 0;
         UpdateVersions(versions);
         NameBox.SelectAll();
         NameBox.Focus();
@@ -51,6 +56,10 @@ public partial class NewVersionWindow : Window
     public string VersionName => NameBox.Text.Trim();
 
     public string DshVersion => VersionBox.SelectedItem?.ToString()?.Trim() ?? string.Empty;
+
+    /// <summary>弹窗内临时选择的下载源；只影响本次创建，不回写设置（work-log/161）。</summary>
+    public DshDownloadSource SelectedDownloadSource =>
+        DownloadSourceBox.SelectedIndex == 1 ? DshDownloadSource.ChinaMirror : DshDownloadSource.Official;
 
     private void Create_Click(object sender, RoutedEventArgs e)
     {

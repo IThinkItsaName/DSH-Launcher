@@ -11,6 +11,14 @@ public sealed class DshInstallService
     public const string OfficialRegistry = "https://registry.npmjs.org";
     public const string ChinaRegistry = "https://registry.npmmirror.com";
 
+    /// <summary>下载源 → npm registry URL（work-log/161）。所有版本下载一律走这里，不再各写各的。</summary>
+    public static string RegistryFor(DshDownloadSource source) =>
+        source == DshDownloadSource.ChinaMirror ? ChinaRegistry : OfficialRegistry;
+
+    /// <summary>下载源的中文显示名（界面与进度文案共用）。</summary>
+    public static string DisplayNameFor(DshDownloadSource source) =>
+        source == DshDownloadSource.ChinaMirror ? "npmmirror 国内镜像" : "npm 官方源";
+
     private static readonly TimeSpan InstallTimeout = TimeSpan.FromMinutes(10);
     private static readonly SemaphoreSlim VersionInstallGate = new(1, 1);
 

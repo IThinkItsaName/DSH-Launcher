@@ -43,9 +43,17 @@ public partial class VersionSwitchWindow : Window
         _preselectVersion = preselectVersion;
         InstanceText.Text = $"实例：{instance.Name}（Kind: {instance.KindText}）"
             + $"\n当前 DSh：{instance.DetectedVersion ?? "未知"} · DSH_HOME 保留：{instance.DshHome}";
+        DownloadSourceBox.Items.Add("npm 官方源（registry.npmjs.org）");
+        DownloadSourceBox.Items.Add("npmmirror 国内镜像（registry.npmmirror.com）");
+        DownloadSourceBox.SelectedIndex = settingsService.ReadLauncherSettings().DownloadSource
+            == DshDownloadSource.ChinaMirror ? 1 : 0;
         Closed += (_, _) => _cancellation.Cancel();
         Loaded += async (_, _) => await RefreshVersionsAsync();
     }
+
+    /// <summary>弹窗内临时选择的下载源；只影响本次检查/切换，不回写设置（work-log/161）。</summary>
+    private DshDownloadSource SelectedDownloadSource =>
+        DownloadSourceBox.SelectedIndex == 1 ? DshDownloadSource.ChinaMirror : DshDownloadSource.Official;
 
     /// <summary>预选版本（"一键回退"传入上一条历史的起点版本）；为空时选当前版本。</summary>
     private readonly string? _preselectVersion;
@@ -199,6 +207,7 @@ public partial class VersionSwitchWindow : Window
                 node,
                 allowDownload: true,
                 instance: _instance,
+                downloadSource: SelectedDownloadSource,
                 progress: progress,
                 cancellationToken: _cancellation.Token);
             _precheck = _switchService.Precheck(_instance, _target, node);

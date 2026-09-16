@@ -3026,6 +3026,92 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         runtimePanel.Children.Add(hint);
 
+        // 版本下载源（work-log/161）：管「新建版本 / 更换运行版本 / 导入整合包按需下载」从哪取 DSh 版本包。
+        runtimePanel.Children.Add(new TextBlock
+        {
+            Text = "版本下载源",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 18, 0, 0)
+        });
+        var downloadSourceBox = new System.Windows.Controls.ComboBox
+        {
+            Height = 34,
+            Padding = new Thickness(8, 4, 8, 4),
+            Margin = new Thickness(0, 6, 0, 0),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+            MinWidth = 320,
+            ToolTip = "作用于「新建版本」「更换运行版本」与导入整合包时的按需下载；两个弹窗里还能临时改。"
+        };
+        downloadSourceBox.Items.Add("npm 官方源（registry.npmjs.org）");
+        downloadSourceBox.Items.Add("npmmirror 国内镜像（registry.npmmirror.com）");
+        runtimePanel.Children.Add(downloadSourceBox);
+        runtimePanel.Children.Add(new TextBlock
+        {
+            Text = "Node.js 与「准备运行环境」仍按上面的按钮选择；这一项只管 versions 目录下 DSh 版本包的下载。",
+            Foreground = (WpfBrush)FindResource("MutedBrush"),
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0)
+        });
+
+        var syncingDownloadSource = false;
+
+        DshDownloadSource CurrentDownloadSource() =>
+            _versionSettingsService.ReadLauncherSettings().DownloadSource;
+
+        void SyncDownloadSourceBox()
+        {
+            var index = CurrentDownloadSource() == DshDownloadSource.ChinaMirror ? 1 : 0;
+            if (downloadSourceBox.SelectedIndex == index)
+            {
+                return;
+            }
+
+            // 同步时不应反过来再写一次设置。
+            syncingDownloadSource = true;
+            try
+            {
+                downloadSourceBox.SelectedIndex = index;
+            }
+            finally
+            {
+                syncingDownloadSource = false;
+            }
+        }
+
+        void SaveDownloadSource(DshDownloadSource source)
+        {
+            try
+            {
+                var settings = _versionSettingsService.ReadLauncherSettings();
+                if (settings.DownloadSource == source)
+                {
+                    return;
+                }
+
+                settings.DownloadSource = source;
+                _versionSettingsService.SaveLauncherSettings(settings);
+            }
+            catch (Exception ex) when (ex is IOException
+                or UnauthorizedAccessException
+                or System.Text.Json.JsonException)
+            {
+                ShowNotice($"下载源设置保存失败：{ex.Message}");
+            }
+        }
+
+        downloadSourceBox.SelectionChanged += (_, _) =>
+        {
+            if (syncingDownloadSource || downloadSourceBox.SelectedIndex < 0)
+            {
+                return;
+            }
+
+            SaveDownloadSource(downloadSourceBox.SelectedIndex == 1
+                ? DshDownloadSource.ChinaMirror
+                : DshDownloadSource.Official);
+        };
+
         void UpdateStatus()
         {
             var preferredDshDirectory = GetConfiguredDshInstallDirectory();
@@ -3051,6 +3137,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             prepareMirrorButton.IsEnabled = prepareButton.IsEnabled;
             prepareButton.Visibility = ready ? Visibility.Collapsed : Visibility.Visible;
             prepareMirrorButton.Visibility = ready ? Visibility.Collapsed : Visibility.Visible;
+            SyncDownloadSourceBox();
         }
 
         async Task<bool> SaveDshInstallLocationAsync(bool showNotice)
@@ -3198,6 +3285,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (await SaveDshInstallLocationAsync(showNotice: false))
             {
+                // 一次性选择同时作为全局默认记入设置（work-log/161）。
+                SaveDownloadSource(DshDownloadSource.Official);
+                SyncDownloadSourceBox();
                 await PrepareRuntimeFromSettingsAsync("Node.js 官方源", NodeInstallService.OfficialDistBase, DshInstallService.OfficialRegistry);
             }
         };
@@ -3205,6 +3295,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (await SaveDshInstallLocationAsync(showNotice: false))
             {
+                SaveDownloadSource(DshDownloadSource.ChinaMirror);
+                SyncDownloadSourceBox();
                 await PrepareRuntimeFromSettingsAsync("npmmirror 国内镜像", NodeInstallService.MirrorDistBase, DshInstallService.ChinaRegistry);
             }
         };
@@ -7589,13 +7681,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _versionSettingsService.SaveLauncherSettings(launcherSettings);
             await RefreshDshAsync(forceRefresh: true);
 
-            var sourceName = choice.Source == FirstRunDownloadSource.ChinaMirror
+            var sourceName = choice.Source == DshDownloadSource.ChinaMirror
                 ? "npmmirror 国内镜像"
                 : "Node.js 官方源";
-            var nodeDistBase = choice.Source == FirstRunDownloadSource.ChinaMirror
+            var nodeDistBase = choice.Source == DshDownloadSource.ChinaMirror
                 ? NodeInstallService.MirrorDistBase
                 : NodeInstallService.OfficialDistBase;
-            var npmRegistry = choice.Source == FirstRunDownloadSource.ChinaMirror
+            var npmRegistry = choice.Source == DshDownloadSource.ChinaMirror
                 ? DshInstallService.ChinaRegistry
                 : DshInstallService.OfficialRegistry;
             if (!await PrepareRuntimeAsync(sourceName, nodeDistBase, npmRegistry, null))

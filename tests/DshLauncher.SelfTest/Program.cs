@@ -2476,6 +2476,37 @@ Check("autoreg/排除集里的无效路径被忽略且不报错",
     autoRegBadExclusion.AddedInstances.Count == 1 && autoRegBadExclusion.Errors.Count == 0,
     $"added={autoRegBadExclusion.AddedInstances.Count} errors={autoRegBadExclusion.Errors.Count}");
 
+// ===========================================================================
+// 20. 版本下载源（work-log/161）
+// =========================================================================
+Check("download-source/官方源 → npmjs registry",
+    DshInstallService.RegistryFor(DshDownloadSource.Official) == "https://registry.npmjs.org",
+    DshInstallService.RegistryFor(DshDownloadSource.Official));
+Check("download-source/国内镜像 → npmmirror registry",
+    DshInstallService.RegistryFor(DshDownloadSource.ChinaMirror) == "https://registry.npmmirror.com",
+    DshInstallService.RegistryFor(DshDownloadSource.ChinaMirror));
+Check("download-source/显示名区分两个源",
+    DshInstallService.DisplayNameFor(DshDownloadSource.Official).Contains("官方", StringComparison.Ordinal)
+    && DshInstallService.DisplayNameFor(DshDownloadSource.ChinaMirror).Contains("镜像", StringComparison.Ordinal),
+    $"{DshInstallService.DisplayNameFor(DshDownloadSource.Official)} / {DshInstallService.DisplayNameFor(DshDownloadSource.ChinaMirror)}");
+
+// 向后兼容：旧 launcher-settings.json 没有该字段 → 默认官方源（不改变现有行为）
+var legacyDownloadSettings = JsonSerializer.Deserialize<LauncherSettingsData>("{\"DshInstallDirectory\":\"D:\\\\x\"}");
+Check("download-source/旧设置文件缺字段 → 默认官方源",
+    legacyDownloadSettings is not null && legacyDownloadSettings.DownloadSource == DshDownloadSource.Official);
+Check("download-source/ChinaMirror 可反序列化",
+    JsonSerializer.Deserialize<LauncherSettingsData>("{\"DownloadSource\":\"ChinaMirror\"}")?.DownloadSource
+        == DshDownloadSource.ChinaMirror);
+Check("download-source/不认识的写法回落官方源（防御式）",
+    JsonSerializer.Deserialize<LauncherSettingsData>("{\"DownloadSource\":\"Whatever\"}")?.DownloadSource
+        == DshDownloadSource.Official);
+var serializedDownloadSettings = JsonSerializer.Serialize(
+    new LauncherSettingsData { DownloadSource = DshDownloadSource.ChinaMirror });
+Check("download-source/序列化为字符串枚举（非数字）",
+    serializedDownloadSettings.Contains("\"DownloadSource\"", StringComparison.Ordinal)
+    && serializedDownloadSettings.Contains("ChinaMirror", StringComparison.Ordinal),
+    serializedDownloadSettings[..Math.Min(100, serializedDownloadSettings.Length)]);
+
 try
 {
     Directory.Delete(scratch, recursive: true);

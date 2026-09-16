@@ -146,6 +146,39 @@ public sealed class CloseBehaviorConverter : JsonConverter<CloseBehavior>
         writer.WriteStringValue(value.ToString());
 }
 
+/// <summary>
+/// DSh 版本 / 运行时的下载源（work-log/161）：即 npm registry。
+/// 作用于「新建版本」「更换运行版本」与「导入整合包按需下载」三条路。
+/// </summary>
+public enum DshDownloadSource
+{
+    /// <summary>npm 官方源（默认；不改变既有行为）。</summary>
+    Official,
+
+    /// <summary>npmmirror 国内镜像。</summary>
+    ChinaMirror
+}
+
+/// <summary>
+/// 按字符串落盘；**旧设置文件没有该字段或写法不认识时，一律回落到官方源**
+/// （与 <see cref="CloseBehaviorConverter"/> 同样的防御式写法）。
+/// </summary>
+public sealed class DshDownloadSourceConverter : JsonConverter<DshDownloadSource>
+{
+    public override DshDownloadSource Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var value = reader.GetString();
+        return value switch
+        {
+            "ChinaMirror" => DshDownloadSource.ChinaMirror,
+            _ => DshDownloadSource.Official
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, DshDownloadSource value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
+}
+
 public sealed class LauncherSettingsData
 {
     public bool SyncAllConfiguration { get; set; }
@@ -168,6 +201,12 @@ public sealed class LauncherSettingsData
 
     /// <summary>实例守护监控轮询间隔（秒，2–120；默认 5）。</summary>
     public int WatchdogProbeSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// DSh 版本下载源（全局默认；两个弹窗可临时覆盖）。见 work-log/161。
+    /// </summary>
+    [JsonConverter(typeof(DshDownloadSourceConverter))]
+    public DshDownloadSource DownloadSource { get; set; } = DshDownloadSource.Official;
 
     /// <summary>Launcher 级代理开关（同时作用于 Launcher HTTP 与 dsh 实例环境变量）。</summary>
     public bool ProxyEnabled { get; set; }

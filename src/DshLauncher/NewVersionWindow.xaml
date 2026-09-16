@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="新建干净版本"
         Width="430"
-        Height="340"
+        Height="410"
         MinWidth="430"
-        MinHeight="320"
+        MinHeight="390"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
@@ -28,7 +28,14 @@
         <StackPanel Grid.Row="2" Margin="0,14,0,0">
             <TextBlock Text="DSh 版本" Margin="0,0,0,6" />
             <ComboBox x:Name="VersionBox" Height="36" Padding="8,4" />
-            <TextBlock Text="本机没有所选版本时，会从 @deepseek-ai/dsh 官方 npm 包下载到设置的 DSh 安装位置。"
+            <TextBlock Text="本机没有所选版本时，会按下面的下载源取 @deepseek-ai/dsh。"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0" />
+            <TextBlock Text="下载源" Margin="0,12,0,6" />
+            <ComboBox x:Name="DownloadSourceBox" Height="36" Padding="8,4" />
+            <TextBlock Text="默认跟随设置；这里改只影响本次创建。"
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="11"
                        TextWrapping="Wrap"

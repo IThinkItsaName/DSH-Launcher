@@ -504,7 +504,8 @@ public partial class VersionControlWindow : UserControl, INotifyPropertyChanged
         var dialog = new NewVersionWindow(
             Window.GetWindow(this),
             localVersions,
-            template.DetectedVersion ?? string.Empty);
+            template.DetectedVersion ?? string.Empty,
+            _versionSettingsService.ReadLauncherSettings().DownloadSource);
         _ = LoadOfficialVersionsIntoDialogAsync(dialog);
         if (dialog.ShowDialog() != true)
         {
@@ -519,7 +520,8 @@ public partial class VersionControlWindow : UserControl, INotifyPropertyChanged
             // 抛“调用线程无法访问此对象”（Task.Run 里不能再碰 dialog）。
             var requestedVersion = dialog.DshVersion;
             var versionName = dialog.VersionName;
-            var runtimeTemplate = await PrepareRuntimeTemplateAsync(template, requestedVersion);
+            var requestedDownloadSource = dialog.SelectedDownloadSource;
+            var runtimeTemplate = await PrepareRuntimeTemplateAsync(template, requestedVersion, requestedDownloadSource);
             var created = await Task.Run(
                 () => _packageService.CreateCleanVersion(runtimeTemplate, versionName),
                 _lifetimeCancellation.Token);
@@ -566,7 +568,8 @@ public partial class VersionControlWindow : UserControl, INotifyPropertyChanged
 
     private async Task<ManagerInstance> PrepareRuntimeTemplateAsync(
         ManagerInstance template,
-        string requestedVersion)
+        string requestedVersion,
+        DshDownloadSource downloadSource)
     {
         var normalizedVersion = requestedVersion.Trim().TrimStart('v', 'V');
         if (!DshInstallService.IsSafePackageVersion(normalizedVersion))
@@ -594,11 +597,11 @@ public partial class VersionControlWindow : UserControl, INotifyPropertyChanged
                 throw new InvalidOperationException("缺少兼容的 Node.js，无法下载所选 DSh 版本。 ");
             }
 
-            SetStatus($"本机没有 DSh {normalizedVersion}，正在从官方 npm 包下载…");
+            SetStatus($"本机没有 DSh {normalizedVersion}，正在从{DshInstallService.DisplayNameFor(downloadSource)}下载…");
             var install = await _dshInstallService.InstallVersionAsync(
                 nodeRuntime,
                 normalizedVersion,
-                DshInstallService.OfficialRegistry,
+                DshInstallService.RegistryFor(downloadSource),
                 versionDirectory,
                 _lifetimeCancellation.Token);
             if (!install.IsSuccess)
@@ -677,9 +680,10 @@ public partial class VersionControlWindow : UserControl, INotifyPropertyChanged
         try
         {
             task = _taskService?.Begin(LauncherTaskKind.RuntimePrepare, $"安装 DSh {requiredVersion}", template.Name, target);
-            task?.Report($"正在从 npm 下载 DSh {requiredVersion}…");
+            var packDownloadSource = _versionSettingsService.ReadLauncherSettings().DownloadSource;
+            task?.Report($"正在从{DshInstallService.DisplayNameFor(packDownloadSource)}下载 DSh {requiredVersion}…");
             var install = await new DshInstallService().InstallVersionAsync(
-                nodeRuntime, requiredVersion, DshInstallService.OfficialRegistry, target,
+                nodeRuntime, requiredVersion, DshInstallService.RegistryFor(packDownloadSource), target,
                 task?.Token ?? _lifetimeCancellation.Token);
             if (!install.IsSuccess) { task?.Fail(install.Error); SetStatusError($"安装 DSh {requiredVersion} 失败：{install.Error}"); return null; }
 

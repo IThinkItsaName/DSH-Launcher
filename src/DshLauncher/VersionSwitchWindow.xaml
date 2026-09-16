@@ -50,6 +50,13 @@
                        FontSize="11"
                        TextWrapping="Wrap"
                        Margin="0,6,0,0" />
+            <TextBlock Text="下载源" Margin="0,12,0,6" />
+            <ComboBox x:Name="DownloadSourceBox" Height="36" Padding="8,4" />
+            <TextBlock Text="仅在本机没有目标版本时生效；默认跟随设置。"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Margin="0,6,0,0" />
         </StackPanel>
 
         <StackPanel Grid.Row="2" Margin="0,14,0,0">
