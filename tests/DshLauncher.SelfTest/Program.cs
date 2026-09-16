@@ -2399,6 +2399,83 @@ Check("crash/多因复合：主因 + 次因（磁盘与退出码线索都在）"
 Check("crash/单一命中时没有次因",
     CrashCauseClassifier.ClassifyAll(CrashProbe(134)).Secondary.Count == 0);
 
+// ===========================================================================
+// 18. 自动注册的“安装目录级排除”（work-log/159 幽灵实例）
+// ===========================================================================
+// 场景复刻：配置的安装目录（run_time）里有一份载荷 node_modules\@deepseek-ai\dsh。
+// 它是“安装的 DSH 环境”，不是实例；不排除则每次启动都会把它重新登记成幽灵实例。
+// 同时必须**不能误伤** versions\<版本>\ —— 那里才是实例应当指向的位置。
+var autoRegRoot = Path.Combine(scratch, "autoreg");
+var fakeInstallDir = Path.Combine(autoRegRoot, "run_time");
+var fakeEnvPackageRoot = Path.Combine(fakeInstallDir, "node_modules", "@deepseek-ai", "dsh");
+var fakeEnvCommand = Path.Combine(fakeInstallDir, "dsh.cmd");
+var fakeVersionedRoot = Path.Combine(fakeInstallDir, "versions", "0.1.6-alpha.1", "node_modules", "@deepseek-ai", "dsh");
+var fakeVersionedCommand = Path.Combine(fakeInstallDir, "versions", "0.1.6-alpha.1", "dsh.cmd");
+Directory.CreateDirectory(fakeEnvPackageRoot);
+Directory.CreateDirectory(fakeVersionedRoot);
+File.WriteAllText(fakeEnvCommand, "@echo off" + Environment.NewLine);
+File.WriteAllText(fakeVersionedCommand, "@echo off" + Environment.NewLine);
+
+static DshRuntimeInfo FakeRuntime(string packageRoot, string command, string version) =>
+    new(
+        IsAvailable: true,
+        ExecutablePath: command,
+        Version: version,
+        PackageRoot: packageRoot,
+        Error: null,
+        LaunchSpec: new DshRuntimeLaunchSpec(DshRuntimeLaunchMode.DirectCommand, command));
+
+static async Task<DetectedRuntimeRegistrationResult> RunAutoRegistrationAsync(
+    string caseRoot,
+    IReadOnlyCollection<DshRuntimeInfo> runtimes,
+    IReadOnlyCollection<string>? excludedRuntimeRoots)
+{
+    Directory.CreateDirectory(caseRoot);
+    var paths = new LauncherPaths(caseRoot, Path.Combine(caseRoot, "exe"));
+    var service = new DetectedRuntimeRegistrationService(new InstanceRegistry(paths));
+    return await service.ImportAsync(
+        Array.Empty<ManagerInstance>(),
+        runtimes,
+        excludedRuntimeRoots: excludedRuntimeRoots);
+}
+
+// 19.1 基线（复刻缺陷）：不排除时，安装目录级载荷**会**被登记成实例
+var autoRegBaseline = await RunAutoRegistrationAsync(
+    Path.Combine(autoRegRoot, "case-baseline"),
+    new[] { FakeRuntime(fakeEnvPackageRoot, fakeEnvCommand, "0.1.5-rc.1") },
+    excludedRuntimeRoots: null);
+Check("autoreg/不排除时安装目录载荷会被登记（复刻幽灵实例）",
+    autoRegBaseline.AddedInstances.Count == 1 && autoRegBaseline.Errors.Count == 0,
+    $"added={autoRegBaseline.AddedInstances.Count} errors={autoRegBaseline.Errors.Count}");
+
+// 19.2 修复：排除安装目录级包根后，不再新增实例（“删了就是永久删了”）
+var autoRegExcluded = await RunAutoRegistrationAsync(
+    Path.Combine(autoRegRoot, "case-excluded"),
+    new[] { FakeRuntime(fakeEnvPackageRoot, fakeEnvCommand, "0.1.5-rc.1") },
+    excludedRuntimeRoots: new[] { fakeEnvPackageRoot });
+Check("autoreg/排除安装目录级包根后不再登记实例",
+    autoRegExcluded.AddedInstances.Count == 0 && autoRegExcluded.Errors.Count == 0,
+    $"added={autoRegExcluded.AddedInstances.Count} errors={autoRegExcluded.Errors.Count}");
+
+// 19.3 精度：排除集只含安装目录级包根时，versions\<版本>\ 仍正常登记（不误伤）
+var autoRegVersioned = await RunAutoRegistrationAsync(
+    Path.Combine(autoRegRoot, "case-versioned"),
+    new[] { FakeRuntime(fakeVersionedRoot, fakeVersionedCommand, "0.1.6-alpha.1") },
+    excludedRuntimeRoots: new[] { fakeEnvPackageRoot });
+Check("autoreg/排除集不误伤 versions\\<版本>\\",
+    autoRegVersioned.AddedInstances.Count == 1
+    && autoRegVersioned.AddedInstances[0].RootPath.Equals(fakeVersionedRoot, StringComparison.OrdinalIgnoreCase),
+    $"added={autoRegVersioned.AddedInstances.Count} root={autoRegVersioned.AddedInstances.FirstOrDefault()?.RootPath}");
+
+// 19.4 排除集里的无效路径不得变成错误（只是被忽略）
+var autoRegBadExclusion = await RunAutoRegistrationAsync(
+    Path.Combine(autoRegRoot, "case-bad-exclusion"),
+    new[] { FakeRuntime(fakeEnvPackageRoot, fakeEnvCommand, "0.1.5-rc.1") },
+    excludedRuntimeRoots: new[] { Path.Combine(autoRegRoot, "does-not-exist") });
+Check("autoreg/排除集里的无效路径被忽略且不报错",
+    autoRegBadExclusion.AddedInstances.Count == 1 && autoRegBadExclusion.Errors.Count == 0,
+    $"added={autoRegBadExclusion.AddedInstances.Count} errors={autoRegBadExclusion.Errors.Count}");
+
 try
 {
     Directory.Delete(scratch, recursive: true);

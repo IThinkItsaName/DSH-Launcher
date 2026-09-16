@@ -23,10 +23,18 @@ public sealed class DetectedRuntimeRegistrationService
         _homeImporter = homeImporter ?? new DshHomeImportService();
     }
 
+    /// <summary>
+    /// 把检测到的运行环境登记为实例。
+    /// </summary>
+    /// <param name="excludedRuntimeRoots">
+    /// 不参与自动登记的运行时包根（如「配置的安装目录」自身——那是安装的 DSH 环境，不是实例）。
+    /// 为 null / 空时**行为与不传完全一致**；手动导入路径应保持不传。
+    /// </param>
     public async Task<DetectedRuntimeRegistrationResult> ImportAsync(
         IReadOnlyCollection<ManagerInstance> existingInstances,
         IReadOnlyCollection<DshRuntimeInfo> detectedRuntimes,
         bool refreshRegisteredRuntimeRoots = false,
+        IReadOnlyCollection<string>? excludedRuntimeRoots = null,
         CancellationToken cancellationToken = default)
     {
         var added = new List<ManagerInstance>();
@@ -35,6 +43,15 @@ public sealed class DetectedRuntimeRegistrationService
         var backfilled = new List<ManagerInstance>();
         var errors = new List<string>();
         var registeredRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var excludedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in excludedRuntimeRoots ?? Array.Empty<string>())
+        {
+            var normalizedExclusion = TryNormalizeRuntimeRoot(candidate);
+            if (normalizedExclusion is not null)
+            {
+                excludedRoots.Add(normalizedExclusion);
+            }
+        }
         var existingByRoot = new Dictionary<string, List<ManagerInstance>>(StringComparer.OrdinalIgnoreCase);
         var usedNames = new HashSet<string>(
             existingInstances.Select(static instance => instance.Name),
@@ -60,6 +77,11 @@ public sealed class DetectedRuntimeRegistrationService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var packageRoot = TryNormalizeRuntimeRoot(runtime.PackageRoot);
+            if (packageRoot is not null && excludedRoots.Contains(packageRoot))
+            {
+                continue;
+            }
+
             if (packageRoot is null
                 || !DshRuntimeCommandFactory.IsUsable(runtime.EffectiveLaunchSpec))
             {

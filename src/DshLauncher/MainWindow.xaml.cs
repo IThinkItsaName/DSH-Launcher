@@ -1033,7 +1033,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             try
             {
-                await AutoImportDetectedDshRuntimesAsync();
+                // 启动/刷新路径：排除「安装目录自身」的运行时根，否则每次启动都会把
+                // run_time 那份载荷重新登记成幽灵实例（work-log/159）。
+                await AutoImportDetectedDshRuntimesAsync(excludeInstallDirectoryRuntimeRoots: true);
             }
             catch (OperationCanceledException) when (_windowCancellation.IsCancellationRequested)
             {
@@ -1079,6 +1081,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private string GetConfiguredDshInstallDirectory() =>
         _versionSettingsService.ResolveDshInstallDirectory();
+
+    /// <summary>
+    /// 「安装目录本身」的运行时包根集合（那是**安装的 DSH 环境**，不是实例）。
+    /// 自动注册时排除它们，避免每次启动把 run_time 自己登记成幽灵实例（work-log/159）。
+    /// 只取**安装目录级**候选（目录自身 / 其 node_modules\@deepseek-ai\dsh），
+    /// 不含 versions\&lt;版本&gt;\ ——那里才是实例应当指向的位置，不能误伤。
+    /// </summary>
+    private IReadOnlyCollection<string> ResolveInstallDirectoryRuntimeRoots()
+    {
+        var installDirectory = GetConfiguredDshInstallDirectory();
+        if (string.IsNullOrWhiteSpace(installDirectory))
+        {
+            return Array.Empty<string>();
+        }
+
+        try
+        {
+            return DshRuntimeDetector.FindKnownPackageRoots(installDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException
+            or IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or System.Security.SecurityException)
+        {
+            return Array.Empty<string>();
+        }
+    }
 
     private sealed record MoveSourceItem(string Label, string Directory);
 
@@ -1891,9 +1921,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         OnPropertyChanged(nameof(CanRestartInstance));
     }
 
+    /// <param name="excludeInstallDirectoryRuntimeRoots">
+    /// 自动注册时是否排除「配置的安装目录」自身的运行时包根。
+    /// 启动/刷新路径传 true：安装目录里那份载荷是**安装的 DSH 环境**，不是实例；
+    /// 不排除则每次启动都会把它重新登记成幽灵实例（work-log/159）。
+    /// 手动「环境扫描导入」路径保持 false —— 那是用户的明确意图。
+    /// </param>
     private async Task<DetectedRuntimeRegistrationResult> AutoImportDetectedDshRuntimesAsync(
         IReadOnlyCollection<DshRuntimeInfo>? runtimes = null,
         bool refreshRegisteredRuntimeRoots = false,
+        bool excludeInstallDirectoryRuntimeRoots = false,
         CancellationToken cancellationToken = default)
     {
         var effectiveCancellation = cancellationToken.CanBeCanceled
@@ -1903,6 +1940,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Instances.ToArray(),
             runtimes ?? _detectedDshRuntimes,
             refreshRegisteredRuntimeRoots,
+            excludeInstallDirectoryRuntimeRoots ? ResolveInstallDirectoryRuntimeRoots() : null,
             effectiveCancellation);
         foreach (var instance in result.AddedInstances)
         {

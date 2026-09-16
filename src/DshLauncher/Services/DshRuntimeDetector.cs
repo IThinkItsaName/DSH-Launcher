@@ -822,7 +822,11 @@ public sealed class DshRuntimeDetector
             new[] { "--version" },
             Path.GetDirectoryName(Path.GetFullPath(executablePath)) ?? Environment.CurrentDirectory);
 
-    private static IReadOnlyList<string> FindKnownPackageRoots(string root)
+    /// <summary>
+    /// 一个目录下「已知的」运行时包根候选（目录自身、node_modules/@deepseek-ai/dsh、Electron 解包目录）。
+    /// 供扫描与「安装目录级排除」共用（见 <see cref="DetectedRuntimeRegistrationService"/>）。
+    /// </summary>
+    internal static IReadOnlyList<string> FindKnownPackageRoots(string root)
     {
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var relative in new[]
