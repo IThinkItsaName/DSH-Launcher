@@ -2507,6 +2507,87 @@ Check("download-source/序列化为字符串枚举（非数字）",
     && serializedDownloadSettings.Contains("ChinaMirror", StringComparison.Ordinal),
     serializedDownloadSettings[..Math.Min(100, serializedDownloadSettings.Length)]);
 
+// ===========================================================================
+// 21. 插件市场条目合并身份（work-log/162）
+// ---------------------------------------------------------------------------
+// 社区目录里“同名不同包”很普遍（实测在线目录 3836 条里有 170 组）。
+// 合并去重必须只用强身份（npm 包名 / 安装 spec / GitHub 仓库），
+// 否则显示名会被当成 npm 包身份，把两个不同插件拼成一张“包名取 A、版本取 B”的卡片。
+// =========================================================================
+static MarketplaceItem BuildMarketItem(
+    string id,
+    string name,
+    string? packageName,
+    string? version,
+    string installSpec,
+    string? repositoryUrl,
+    MarketplaceSourceKind sourceKind,
+    string sourceName,
+    long? stars = null) =>
+    new(
+        id,
+        name,
+        packageName,
+        version,
+        "目录未提供说明。",
+        installSpec,
+        repositoryUrl,
+        "UI",
+        sourceKind,
+        sourceName,
+        MarketplaceVerificationStatus.Unverified,
+        "目录只用于发现，安装前会读取 package.json。",
+        Stars: stars);
+
+// 复刻真实在线目录里的两条 dsh-genui（lhuans 与 omdsh-dev），它们只有显示名相同。
+var genuiLhuans = BuildMarketItem(
+    "CommunityCatalog:dsh-genui", "dsh-genui", "dsh-genui", "0.2.1", "dsh-genui",
+    "https://github.com/lhuans/dsh-genui", MarketplaceSourceKind.CommunityCatalog, "GitHub", 4);
+var genuiOmdsh = BuildMarketItem(
+    "CommunityCatalog:@changfenhuang/dsh-genui", "dsh-genui", "@changfenhuang/dsh-genui", "0.11.0",
+    "@changfenhuang/dsh-genui", "https://github.com/omdsh-dev/dsh-genui",
+    MarketplaceSourceKind.CommunityCatalog, "GitHub", 461);
+var mergedSameName = MarketplaceService.MergeItems(new[] { genuiLhuans, genuiOmdsh });
+Check("market-merge/同名不同包不得合并（dsh-genui 复刻：包名与版本必须同源）",
+    mergedSameName.Count == 2
+    && mergedSameName.Any(item => item.PackageName == "dsh-genui" && item.Version == "0.2.1" && item.Stars == 4)
+    && mergedSameName.Any(item => item.PackageName == "@changfenhuang/dsh-genui" && item.Version == "0.11.0" && item.Stars == 461)
+    && mergedSameName.All(item => !(item.PackageName == "dsh-genui" && item.Version == "0.11.0")),
+    string.Join(" | ", mergedSameName.Select(item => $"{item.Name}/{item.PackageName}@{item.Version}/★{item.Stars}")));
+
+// 回归：同一插件出现在多个来源（同 npm 包名）仍须合并成一条，并保留来源合并痕迹。
+var duplicateA = BuildMarketItem(
+    "CommunityCatalog:dsh-x", "dsh-x", "dsh-x", "1.0.0", "dsh-x",
+    "https://github.com/owner/dsh-x", MarketplaceSourceKind.CommunityCatalog, "GitHub");
+var duplicateB = BuildMarketItem(
+    "Custom:https://example.com/catalog.json", "dsh-x", "dsh-x", "1.0.0", "dsh-x",
+    "https://github.com/owner/dsh-x", MarketplaceSourceKind.Custom, "自定义目录");
+var mergedDuplicate = MarketplaceService.MergeItems(new[] { duplicateA, duplicateB });
+Check("market-merge/同一插件跨来源仍按 npm 包名合并（回归）",
+    mergedDuplicate.Count == 1
+    && mergedDuplicate[0].MergedSourceKinds?.Count == 2
+    && mergedDuplicate[0].PackageName == "dsh-x",
+    string.Join(" | ", mergedDuplicate.Select(item => $"{item.PackageName}@ {item.MergedSourceText}")));
+
+// 回归：GitHub 仓库身份仍参与合并（一边只有 github: spec、另一边有 npm 名，仓库相同 → 一条）。
+var githubOnly = BuildMarketItem(
+    "Custom:https://example.com/catalog2.json", "dsh-y", null, null, "github:owner/dsh-y",
+    "https://github.com/owner/dsh-y", MarketplaceSourceKind.Custom, "自定义目录");
+var npmWithRepo = BuildMarketItem(
+    "CommunityCatalog:dsh-y", "dsh-y", "dsh-y", "0.3.0", "dsh-y",
+    "https://github.com/owner/dsh-y", MarketplaceSourceKind.CommunityCatalog, "GitHub");
+Check("market-merge/GitHub 仓库身份仍参与合并（npm 名 + github spec 同仓库 → 一条）",
+    MarketplaceService.MergeItems(new[] { githubOnly, npmWithRepo }).Count == 1);
+
+// 回归：显示名别名只保留给“已安装匹配”（FindInstalledPlugin），不得被一起删掉。
+var githubAliasItem = BuildMarketItem(
+    "Custom:https://example.com/catalog3.json", "dsh-z", null, null, "github:owner/dsh-z",
+    "https://github.com/owner/dsh-z", MarketplaceSourceKind.Custom, "自定义目录");
+var installedByName = new ExtensionEntry(
+    "dsh-z", ExtensionKind.Plugin, "dsh-z", "0.1.0", null, "/loc", true, true);
+Check("market-merge/显示名别名仍用于已安装匹配（FindInstalledPlugin 回归）",
+    MarketplaceService.FindInstalledPlugin(githubAliasItem, new[] { installedByName }) is not null);
+
 try
 {
     Directory.Delete(scratch, recursive: true);

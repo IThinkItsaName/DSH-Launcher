@@ -1755,7 +1755,7 @@ public sealed class MarketplaceService
         foreach (var raw in items)
         {
             var item = NormalizeSourceKind(raw) with { Category = NormalizeCategory(raw.Category) };
-            var itemIdentities = new HashSet<string>(GetPluginIdentities(item), StringComparer.OrdinalIgnoreCase);
+            var itemIdentities = new HashSet<string>(GetMergeIdentities(item), StringComparer.OrdinalIgnoreCase);
             var matchingIndexes = itemIdentities
                 .Select(identity => identityIndex.TryGetValue(identity, out var index) ? index : -1)
                 .Where(index => index >= 0 && merged[index] is not null)
@@ -1791,7 +1791,7 @@ public sealed class MarketplaceService
             }
 
             var mergedItem = MergeTwoItems(combined, item);
-            combinedIdentities.UnionWith(GetPluginIdentities(mergedItem));
+            combinedIdentities.UnionWith(GetMergeIdentities(mergedItem));
             var mergedIndex = merged.Count;
             merged.Add(mergedItem);
             identitiesByIndex.Add(combinedIdentities);
@@ -2029,9 +2029,31 @@ public sealed class MarketplaceService
         return true;
     }
 
-    private static IReadOnlySet<string> GetPluginIdentities(
+    /// <summary>
+    /// 合并去重用的身份：只用**强身份**（npm 包名 / 安装 spec / GitHub 仓库），不含显示名别名。
+    ///
+    /// 社区目录里“同名不同包”非常普遍（如 <c>dsh-genui</c> 同时属于
+    /// lhuans/dsh-genui → npm <c>dsh-genui</c>@0.2.1 与 omdsh-dev/dsh-genui →
+    /// npm <c>@changfenhuang/dsh-genui</c>@0.11.0）。若把显示名也当成 npm 包身份，
+    /// 两者会被合并成一张“包名取 A、版本取 B”的卡片，安装前按这个根本不存在的组合查 npm
+    /// 必然失败（用户实测报「npm 仓库没有找到可读取的版本信息。」，见 work-log/162）。
+    /// </summary>
+    private static IReadOnlySet<string> GetMergeIdentities(MarketplaceItem item)
+    {
+        var identities = GetStrongPluginIdentities(item.PackageName, item.InstallSpec, item.RepositoryUrl);
+
+        // 一个强身份都没有时（极少见）才退回显示名：这类条目本来也无法可靠安装，
+        // 怎么合并都只是列表形态问题，用显示名兜底可避免同一条目重复出现。
+        if (identities.Count == 0 && !string.IsNullOrWhiteSpace(item.Name))
+        {
+            identities.Add($"name:{item.Name.Trim().ToLowerInvariant()}");
+        }
+
+        return identities;
+    }
+
+    private static HashSet<string> GetStrongPluginIdentities(
         string? packageName,
-        string? name,
         string? installSpec,
         string? repositoryUrl)
     {
@@ -2041,9 +2063,22 @@ public sealed class MarketplaceService
             identities.UnionWith(EnumeratePluginIdentities(value));
         }
 
+        return identities;
+    }
+
+    private static IReadOnlySet<string> GetPluginIdentities(
+        string? packageName,
+        string? name,
+        string? installSpec,
+        string? repositoryUrl)
+    {
+        var identities = GetStrongPluginIdentities(packageName, installSpec, repositoryUrl);
+
         // GitHub install specs are saved by DSh under the package name declared
         // by the repository. Include a package-like display name as an alias so
         // an installed GitHub plugin is recognized immediately after refresh.
+        // 注意：该别名只服务 FindInstalledPlugin 的“已安装匹配”，
+        // **不参与** MergeItems 去重（见 GetMergeIdentities）。
         identities.UnionWith(EnumeratePluginIdentities(name));
 
         if (identities.Count == 0 && !string.IsNullOrWhiteSpace(name))
