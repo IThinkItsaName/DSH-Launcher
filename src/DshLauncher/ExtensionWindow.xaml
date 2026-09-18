@@ -9,13 +9,24 @@
              Loaded="Window_OnLoaded">
     <UserControl.Resources>
         <!-- 左侧「当前实例」卡里的工具条按钮：紧凑尺寸（Padding 9,4 + 12px 字号），
-             避免 9 个按钮在大尺寸下换行到 3 行。 -->
+             避免 9 个按钮在大尺寸下换行到 3 行。
+             MinHeight=0（主/危险变体）：PrimaryButton/DangerButton 自带 MinHeight=38，
+             在 WrapPanel 里会把整行撑高，而同行的次级按钮因默认 VerticalAlignment=Stretch
+             被拉到同样高（2026-09-18 用户反馈「插件矩阵 / 手动安装 Plugin 比旁边按钮大」）。
+             清零后三种紧凑按钮都按内容自然高度渲染，彼此一致。 -->
         <Style x:Key="CompactToolbarButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Padding" Value="9,4" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,0,6,6" />
         </Style>
         <Style x:Key="CompactToolbarPrimaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="9,4" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+        </Style>
+        <Style x:Key="CompactToolbarDangerButton" TargetType="Button" BasedOn="{StaticResource DangerButton}">
+            <Setter Property="MinHeight" Value="0" />
             <Setter Property="Padding" Value="9,4" />
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,0,6,6" />
@@ -230,10 +241,10 @@
                                     Click="PathLink_Click" />
                         </StackPanel>
                         <WrapPanel Margin="0,10,0,0">
-                            <Button x:Name="EnableButton" Content="启用" Click="Enable_Click" Margin="0,0,6,6" Padding="10,6" />
-                            <Button x:Name="DisableButton" Content="禁用" Click="Disable_Click" Margin="0,0,6,6" Padding="10,6" />
-                            <Button x:Name="UpdateButton" Content="更新" Click="Update_Click" Margin="0,0,6,6" Padding="10,6" />
-                            <Button Style="{StaticResource DangerButton}" x:Name="RemoveButton" Content="删除" Click="Remove_Click" Margin="0,0,6,6" Padding="10,6" />
+                            <Button Style="{StaticResource CompactToolbarButton}" x:Name="EnableButton" Content="启用" Click="Enable_Click" />
+                            <Button Style="{StaticResource CompactToolbarButton}" x:Name="DisableButton" Content="禁用" Click="Disable_Click" />
+                            <Button Style="{StaticResource CompactToolbarButton}" x:Name="UpdateButton" Content="更新" Click="Update_Click" />
+                            <Button Style="{StaticResource CompactToolbarDangerButton}" x:Name="RemoveButton" Content="删除" Click="Remove_Click" />
                         </WrapPanel>
                         <TextBlock x:Name="HintText"
                                    Text="修改前请停止实例。Plugin 和 MCP 会在下次启动时生效。"

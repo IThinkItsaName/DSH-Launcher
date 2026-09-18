@@ -198,7 +198,8 @@
 - 默认样式：白底 + `#C5D5E6` 描边 + 8px 圆角 + 内边距 16,9；悬停变主色。
 - 主操作：`PrimaryButton`（蓝底白字 SemiBold）。
 - 紧凑按钮：`Padding="10,6"`；工具条按钮 `Padding="12,7"`。
-- 信息卡内的多按钮工具条（如「当前实例」卡）：`Padding="9,4"` + `FontSize="12"` + `Margin="0,0,6,6"`（本页定义 `CompactToolbarButton` / `CompactToolbarPrimaryButton`），避免在窄列里换行过多。
+- 信息卡内的多按钮工具条（如「当前实例」卡、「当前选择」卡）：`Padding="9,4"` + `FontSize="12"` + `Margin="0,0,6,6"`（本页定义 `CompactToolbarButton` / `CompactToolbarPrimaryButton` / `CompactToolbarDangerButton`），避免在窄列里换行过多。
+  ⚠️ 紧凑变体必须把 `PrimaryButton`/`DangerButton` 继承的 `MinHeight="38"` **显式清零**（`MinHeight="0"`）：否则它在 `WrapPanel` 里会把整行掉高，而同行次级按钮因默认 `VerticalAlignment=Stretch` 被拉到同样高（2026-09-18 用户反馈「插件矩阵 / 手动安装 Plugin 比旁边按钮大」，变更集 158）。
 - 危险操作：`Foreground="{StaticResource DangerBrush}"`。
 - 不要自建按钮模板；导航按钮用 `NavButton` / `TopNavButton`。
 
