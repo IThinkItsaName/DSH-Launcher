@@ -101,11 +101,6 @@
                             Click="UpdateAll_Click"
                             Style="{StaticResource CompactToolbarPrimaryButton}"
                             Visibility="Collapsed" />
-                    <Button x:Name="DoctorButton"
-                            Content="依赖自检"
-                            Click="Doctor_Click"
-                            Style="{StaticResource CompactToolbarButton}"
-                            ToolTip="检测 profile 中混入的核心包/缺失 bundle" />
                     <Button x:Name="PluginMatrixButton"
                             Content="插件矩阵"
                             Click="PluginMatrix_Click"

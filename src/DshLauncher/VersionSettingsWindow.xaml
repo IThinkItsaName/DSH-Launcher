@@ -305,13 +305,23 @@
                             CornerRadius="{StaticResource CardCornerRadius}"
                             Padding="20">
                         <StackPanel>
-                            <DockPanel>
-                                <TextBlock Text="已安装 Plugin" FontSize="16" FontWeight="SemiBold" />
-                                <Button Content="刷新"
-                                        Click="RefreshPlugins_Click"
-                                        DockPanel.Dock="Right"
-                                        Padding="14,6" />
-                            </DockPanel>
+                            <!-- 变更集 158：原 DockPanel 的最后一个子元素（刷新按钮）被 LastChildFill
+                                 拉伸到整行宽；改为 Grid（文字 * / 按钮 Auto 右对齐），并把原扩展页
+                                 工具条的「依赖自检」入口合并到这里。 -->
+                            <Grid>
+                                <TextBlock Text="已安装 Plugin" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Button x:Name="DoctorButton"
+                                            Content="依赖自检"
+                                            Click="RunDoctor_Click"
+                                            Padding="14,6"
+                                            ToolTip="检测 profile 中混入的核心包 / 缺失 bundle" />
+                                    <Button Content="刷新"
+                                            Click="RefreshPlugins_Click"
+                                            Padding="14,6"
+                                            Margin="8,0,0,0" />
+                                </StackPanel>
+                            </Grid>
                             <TextBlock x:Name="PluginEmptyText"
                                        Text="当前版本没有检测到已安装 Plugin。"
                                        Foreground="{StaticResource MutedBrush}"
@@ -320,12 +330,18 @@
                             <ListBox x:Name="PluginList"
                                      BorderThickness="0"
                                      Background="Transparent"
-                                     Margin="0,12,0,0" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" >
+                                     Margin="0,12,0,0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" >
                                 <ListBox.ItemContainerStyle>
                                     <Style TargetType="ListBoxItem">
                                         <Setter Property="Padding" Value="0" />
                                         <Setter Property="Margin" Value="0,0,0,8" />
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <!-- 变更集 158（与市场列表同理）：CanContentScroll=True 下虚拟化面板以无限宽度
+                                             测量条目，带长描述的条目想要宽度可到 2000px+，导致无意义横向滚动、右侧按钮被
+                                             挤出视口（实测条目 2110px vs 视口 878px）。绑定到列表宽度才能让省略号生效。 -->
+                                        <Setter Property="Width" Value="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ListBox}}" />
                                     </Style>
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
@@ -337,15 +353,18 @@
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel>
-                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" />
                                                     <TextBlock Text="{Binding Version, TargetNullValue=版本未标记}"
                                                                Foreground="{StaticResource MutedBrush}"
                                                                FontSize="11"
                                                                Margin="0,3,0,0" />
+                                                    <!-- 变更集 158：长描述改为单行省略（悬停看全文），不再换行撑宽卡片。 -->
                                                     <TextBlock Text="{Binding Description, TargetNullValue=没有描述}"
                                                                Foreground="{StaticResource MutedBrush}"
                                                                FontSize="11"
-                                                               TextWrapping="Wrap"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Description}"
                                                                Margin="0,3,0,0" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

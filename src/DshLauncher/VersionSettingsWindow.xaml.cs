@@ -1240,6 +1240,57 @@ public partial class VersionSettingsWindow : UserControl
 
     private async void RefreshPlugins_Click(object sender, RoutedEventArgs e) => await LoadPluginsAsync();
 
+    /// <summary>
+    /// 依赖自检（doctor）：原在扩展页工具条的「依赖自检」按钮，变更集 158 按用户要求合并到实例设置的
+    /// 插件管理页（检测 profile 中混入的核心包 / 缺失 bundle）。
+    /// </summary>
+    private async void RunDoctor_Click(object sender, RoutedEventArgs e)
+    {
+        if (_instance is null)
+        {
+            return;
+        }
+
+        if (sender is WpfButton button)
+        {
+            button.IsEnabled = false;
+        }
+
+        PluginStatusText.Text = "正在做依赖自检…";
+        try
+        {
+            var findings = await _extensionService.RunDoctorAsync(_instance);
+            if (findings.Count == 0)
+            {
+                PluginStatusText.Text = "依赖自检通过：未发现核心包混入或 bundle 缺失。";
+                AppDialog.Show(Window.GetWindow(this),
+                    "依赖自检通过：未发现核心包混入或 bundle 缺失。", "依赖自检",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var errors = findings.Count(finding => finding.Level == "error");
+            PluginStatusText.Text = $"依赖自检：{findings.Count} 项发现（{errors} 项错误）。";
+            AppDialog.Show(Window.GetWindow(this),
+                string.Join("\n\n", findings.Select(finding =>
+                    $"[{(finding.Level == "error" ? "错误" : "警告")}] {finding.Message}")),
+                "依赖自检结果",
+                MessageBoxButton.OK,
+                errors > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            PluginStatusText.Text = $"依赖自检失败：{ex.Message}";
+        }
+        finally
+        {
+            if (sender is WpfButton restore)
+            {
+                restore.IsEnabled = true;
+            }
+        }
+    }
+
     private async Task LoadPluginsAsync()
     {
         if (_instance is null)

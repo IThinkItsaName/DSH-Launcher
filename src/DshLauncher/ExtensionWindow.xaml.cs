@@ -136,7 +136,6 @@ public partial class ExtensionWindow : UserControl
             InstallPluginButton.Visibility = Visibility.Collapsed;
             CheckUpdatesButton.Visibility = Visibility.Collapsed;
             UpdateAllButton.Visibility = Visibility.Collapsed;
-            DoctorButton.Visibility = Visibility.Collapsed;
             AddMcpButton.Visibility = Visibility.Collapsed;
             DshMarketHotReloadCheckBox.Visibility = Visibility.Collapsed;
             EnableButton.Visibility = Visibility.Collapsed;
@@ -2240,41 +2239,6 @@ public partial class ExtensionWindow : UserControl
     }
 
     private void PluginMatrix_Click(object sender, RoutedEventArgs e) => _openPluginMatrix?.Invoke();
-
-    private async void Doctor_Click(object sender, RoutedEventArgs e)
-    {
-        DoctorButton.IsEnabled = false;
-        StatusText.Text = "正在做依赖自检…";
-        try
-        {
-            var findings = await _service.RunDoctorAsync(_instance);
-            if (findings.Count == 0)
-            {
-                StatusText.Text = "依赖自检通过：未发现核心包混入或 bundle 缺失。";
-                AppDialog.Show(Window.GetWindow(this),
-                    "依赖自检通过：未发现核心包混入或 bundle 缺失。", "依赖自检",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var errors = findings.Count(finding => finding.Level == "error");
-            StatusText.Text = $"依赖自检：{findings.Count} 项发现（{errors} 项错误）。";
-            AppDialog.Show(Window.GetWindow(this),
-                string.Join("\n\n", findings.Select(finding =>
-                    $"[{(finding.Level == "error" ? "错误" : "警告")}] {finding.Message}")),
-                "依赖自检结果",
-                MessageBoxButton.OK,
-                errors > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"依赖自检失败：{ex.Message}";
-        }
-        finally
-        {
-            DoctorButton.IsEnabled = true;
-        }
-    }
 
     private void ScheduleUiStateSave()
     {
