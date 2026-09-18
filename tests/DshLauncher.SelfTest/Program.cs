@@ -2588,6 +2588,24 @@ var installedByName = new ExtensionEntry(
 Check("market-merge/显示名别名仍用于已安装匹配（FindInstalledPlugin 回归）",
     MarketplaceService.FindInstalledPlugin(githubAliasItem, new[] { installedByName }) is not null);
 
+// ===========================================================================
+// 22. 市场目录下载：自动解压（work-log/163）
+// ---------------------------------------------------------------------------
+// 社区目录 plugins.json 明文约 3.9 MB，本网络明文下载常超 90s，gzip 后约 1 MB / 约 8s。
+// handler 必须开自动解压，否则「刷新目录」频繁超时，旧缓存换不掉。
+// =========================================================================
+using (var catalogHandler = MarketplaceService.CreateHttpHandler())
+{
+    Check("market-http/开启自动解压（gzip / deflate / br，防 3.9MB 明文目录拉取超时）",
+        catalogHandler.AutomaticDecompression == System.Net.DecompressionMethods.All
+        && catalogHandler.AutomaticDecompression.HasFlag(System.Net.DecompressionMethods.GZip)
+        && catalogHandler.AutomaticDecompression.HasFlag(System.Net.DecompressionMethods.Deflate)
+        && catalogHandler.AutomaticDecompression.HasFlag(System.Net.DecompressionMethods.Brotli),
+        catalogHandler.AutomaticDecompression.ToString());
+    Check("market-http/仍使用默认系统代理（不改变既有代理行为）",
+        catalogHandler.UseProxy);
+}
+
 try
 {
     Directory.Delete(scratch, recursive: true);

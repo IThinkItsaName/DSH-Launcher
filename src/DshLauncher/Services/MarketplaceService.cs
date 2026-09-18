@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http;
 using System.IO;
@@ -22,10 +23,11 @@ public sealed class MarketplaceService
     public const string CommunitySiteZhUrl = "https://awesome-dsh-plugin.com/zh/";
 
     /// <summary>
-    /// 单个来源超时。社区目录完整数据约 1.9MB，本网络实测 25-60s 波动；
-    /// 预算与刷新总超时（90s）对齐，避免网络抖动导致整次刷新失败。
+    /// 单个来源超时。社区目录 <c>plugins.json</c> 明文约 3.9 MB（gzip 后约 1 MB），
+    /// 本网络实测直连明文 20 s~90 s+ 波动；预算给足，避免网络抖动导致整次刷新失败。
+    /// 与 <c>ExtensionWindow</c> 的刷新总预算（180 s）对齐。
     /// </summary>
-    private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(180);
     private const int MaxThemePreviewBytes = 8 * 1024 * 1024;
     private static readonly Regex MarkdownImage = new(
         @"!\[[^\]]*\]\(\s*(?:<(?<url>[^>]+)>|(?<url>[^\s\)]+))(?:\s+[\""'][^\)]*)?\s*\)",
@@ -1516,7 +1518,7 @@ public sealed class MarketplaceService
 
     private static HttpClient CreateHttpClient()
     {
-        var client = new HttpClient
+        var client = new HttpClient(CreateHttpHandler())
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
@@ -1524,6 +1526,20 @@ public sealed class MarketplaceService
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
+
+    /// <summary>
+    /// 市场专用 handler：**开启自动解压**（gzip / deflate / br）。
+    /// 社区目录 <c>plugins.json</c> 明文约 3.9 MB，本网络实测明文下载常超 90 s，
+    /// 而 gzip 后约 1 MB / 约 8 s。不开解压会让「刷新目录」频繁超时、
+    /// 旧缓存永远换不掉（人只能看到并点上过期的合并卡片，work-log/163）。
+    /// handler 仍用默认系统代理（<see cref="SocketsHttpHandler.UseProxy"/> 默认 true），
+    /// 不改变既有代理行为。
+    /// </summary>
+    internal static SocketsHttpHandler CreateHttpHandler() =>
+        new()
+        {
+            AutomaticDecompression = DecompressionMethods.All
+        };
 
     private static MarketplaceItem? ParseCatalogEntry(
         JsonElement entry,
