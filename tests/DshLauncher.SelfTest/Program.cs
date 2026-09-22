@@ -2606,6 +2606,79 @@ using (var catalogHandler = MarketplaceService.CreateHttpHandler())
         catalogHandler.UseProxy);
 }
 
+// ===========================================================================
+// 160. MCP 注入的 launcher.patch.yml：新增条目必须放进 dsh 的 insert 列表
+// ===========================================================================
+{
+    var mcpHome = Path.Combine(scratch, "mcp-patch-home");
+    Directory.CreateDirectory(mcpHome);
+    var mcpInstance = BuildInstance("mcp-patch", mcpHome);
+    var mcpPatchPath = Path.Combine(mcpHome, "launcher.patch.yml");
+
+    var stdioServer = new McpServerDefinition(
+        "smoke",
+        "stdio",
+        @"C:\Program Files\nodejs\node.exe",
+        new[] { @"C:\work\server.mjs", "--flag" },
+        null,
+        new Dictionary<string, string> { ["TOKEN"] = "a b" },
+        @"C:\work");
+    var httpServer = new McpServerDefinition(
+        "remote",
+        "streamable-http",
+        string.Empty,
+        Array.Empty<string>(),
+        "https://example.com/mcp",
+        new Dictionary<string, string> { ["Authorization"] = "Bearer x" },
+        null);
+    var disabledServer = new McpServerDefinition(
+        "off",
+        "stdio",
+        "node",
+        Array.Empty<string>(),
+        null,
+        new Dictionary<string, string>(),
+        null,
+        Enabled: false);
+
+    ExtensionService.WriteLauncherPatch(mcpInstance, new[] { stdioServer, httpServer, disabledServer });
+    var patchText = File.ReadAllText(mcpPatchPath);
+    var expectedPatch = ("""
+        - insert:
+            - id: "launcher-mcp-smoke"
+              name: "@deepseek-ai/dsh-mcp-client"
+              config:
+                transport: "stdio"
+                serverName: "smoke"
+                command: "C:\\Program Files\\nodejs\\node.exe"
+                args: ["C:\\work\\server.mjs","--flag"]
+                cwd: "C:\\work"
+                env: {"TOKEN":"a b"}
+                failOnStartupError: false
+            - id: "launcher-mcp-remote"
+              name: "@deepseek-ai/dsh-mcp-client"
+              config:
+                transport: "streamable-http"
+                serverName: "remote"
+                url: "https://example.com/mcp"
+                headers: {"Authorization":"Bearer x"}
+                failOnStartupError: false
+        """ + "\n").ReplaceLineEndings();
+    Check(
+        "mcp-patch/新增条目必须包在 insert 列表里（裸 id 条目会被 dsh 当「改已存在条目」而静默跳过）",
+        string.Equals(patchText, expectedPatch, StringComparison.Ordinal),
+        patchText.Replace("\n", "\\n"));
+
+    ExtensionService.WriteLauncherPatch(mcpInstance, Array.Empty<McpServerDefinition>());
+    var emptyPatch = File.ReadAllText(mcpPatchPath);
+    ExtensionService.WriteLauncherPatch(mcpInstance, new[] { disabledServer });
+    var disabledPatch = File.ReadAllText(mcpPatchPath);
+    Check(
+        "mcp-patch/没有启用项时写空列表 []（而不是空的 insert 块），且禁用的条目不写入",
+        emptyPatch == "[]\n" && disabledPatch == "[]\n",
+        $"empty={emptyPatch.Replace("\n", "\\n")} disabled={disabledPatch.Replace("\n", "\\n")}");
+}
+
 try
 {
     Directory.Delete(scratch, recursive: true);

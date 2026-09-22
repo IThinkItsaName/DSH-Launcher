@@ -1360,30 +1360,41 @@ public sealed partial class ExtensionService
         await Task.CompletedTask;
     }
 
-    private static void WriteLauncherPatch(ManagerInstance instance, IReadOnlyList<McpServerDefinition> definitions)
+    /// <summary>
+    /// 写实例的 launcher.patch.yml（MCP 注入），供启动时以 --patch 传入。
+    /// dsh 的 patch 方言里，带 id 不带 insert 的条目是「按 id 修改已存在条目」，
+    /// 找不到目标就 warn + skip——启动器自造的 launcher-mcp-* 永远不可能已存在，
+    /// 所以整份文件等于空操作（变更集 160 修复）；新增条目必须放在 insert 列表里。
+    /// </summary>
+    internal static void WriteLauncherPatch(ManagerInstance instance, IReadOnlyList<McpServerDefinition> definitions)
     {
         var enabled = definitions.Where(item => item.Enabled).ToArray();
         var builder = new StringBuilder();
+        if (enabled.Length > 0)
+        {
+            builder.AppendLine("- insert:");
+        }
+
         foreach (var definition in enabled)
         {
-            builder.AppendLine($"- id: {YamlString($"launcher-mcp-{definition.ServerName}")}");
-            builder.AppendLine($"  name: {YamlString(McpPackage)}");
-            builder.AppendLine("  config:");
-            builder.AppendLine($"    transport: {YamlString(definition.Transport)}");
-            builder.AppendLine($"    serverName: {YamlString(definition.ServerName)}");
+            builder.AppendLine($"    - id: {YamlString($"launcher-mcp-{definition.ServerName}")}");
+            builder.AppendLine($"      name: {YamlString(McpPackage)}");
+            builder.AppendLine("      config:");
+            builder.AppendLine($"        transport: {YamlString(definition.Transport)}");
+            builder.AppendLine($"        serverName: {YamlString(definition.ServerName)}");
             if (definition.Transport == "stdio")
             {
-                builder.AppendLine($"    command: {YamlString(definition.Command)}");
-                builder.AppendLine($"    args: {JsonSerializer.Serialize(definition.Arguments)}");
-                builder.AppendLine($"    cwd: {YamlString(definition.WorkingDirectory ?? string.Empty)}");
-                builder.AppendLine($"    env: {JsonSerializer.Serialize(definition.Headers)}");
+                builder.AppendLine($"        command: {YamlString(definition.Command)}");
+                builder.AppendLine($"        args: {JsonSerializer.Serialize(definition.Arguments)}");
+                builder.AppendLine($"        cwd: {YamlString(definition.WorkingDirectory ?? string.Empty)}");
+                builder.AppendLine($"        env: {JsonSerializer.Serialize(definition.Headers)}");
             }
             else
             {
-                builder.AppendLine($"    url: {YamlString(definition.Url ?? string.Empty)}");
-                builder.AppendLine($"    headers: {JsonSerializer.Serialize(definition.Headers)}");
+                builder.AppendLine($"        url: {YamlString(definition.Url ?? string.Empty)}");
+                builder.AppendLine($"        headers: {JsonSerializer.Serialize(definition.Headers)}");
             }
-            builder.AppendLine("    failOnStartupError: false");
+            builder.AppendLine("        failOnStartupError: false");
         }
 
         var patchPath = Path.Combine(instance.DshHome, "launcher.patch.yml");
