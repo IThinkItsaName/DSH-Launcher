@@ -814,6 +814,53 @@ Check("packarchive/配对校验：v5 配 v3 通过、配 v2 拒载",
 }
 
 // ===========================================================================
+// 12b. 便携数据根重定位（变更集 163）—— 换数据根后实例列表仍要能加载
+// ===========================================================================
+{
+    var portablePaths = new LauncherPaths(Path.Combine(scratch, "portable-root"));
+    Directory.CreateDirectory(portablePaths.RootDirectory);
+    var portableRegistry = new InstanceRegistry(portablePaths);
+
+    // (1) 结构匹配 ⇒ 重定位到当前数据根
+    var rebaseId = "portableabcdef12";
+    var expectedHome = Path.GetFullPath(portablePaths.GetInstanceDshHome(rebaseId));
+    var foreignHome = Path.Combine(scratch, "another-root", "instances", rebaseId, "dsh-home");
+    var rebased = InstanceRegistry.TryRebaseInstanceHome(foreignHome, rebaseId, expectedHome);
+    Check("便携/重定位: 结构匹配时 DSH_HOME 改到当前数据根",
+        string.Equals(rebased, expectedHome, StringComparison.OrdinalIgnoreCase), rebased ?? "null");
+
+    // (2) 结构不匹配（末级名 / 实例 id / 中间层）一律拒绝
+    var notHome = InstanceRegistry.TryRebaseInstanceHome(
+        Path.Combine(scratch, "another-root", "instances", rebaseId, "elsewhere"), rebaseId, expectedHome);
+    var wrongId = InstanceRegistry.TryRebaseInstanceHome(foreignHome, "differentid1234", expectedHome);
+    var wrongShape = InstanceRegistry.TryRebaseInstanceHome(
+        Path.Combine(scratch, "another-root", "homes", rebaseId, "dsh-home"), rebaseId, expectedHome);
+    Check("便携/重定位: 末级名/实例 id/中间层不匹配时拒绝",
+        notHome is null && wrongId is null && wrongShape is null);
+
+    // (3) 端到端：注册表原本写在“另一个数据根”下，拷到便携根后用便携根加载
+    var oldRootPaths = new LauncherPaths(Path.Combine(scratch, "old-root"));
+    Directory.CreateDirectory(oldRootPaths.RootDirectory);
+    var oldRegistry = new InstanceRegistry(oldRootPaths);
+    var portableRuntimeRoot = Path.Combine(scratch, "portable-rt");
+    Directory.CreateDirectory(portableRuntimeRoot);
+    var portableInstance = oldRegistry.Register(
+        "便携实例", portableRuntimeRoot, InstanceKind.Installed,
+        Path.Combine(portableRuntimeRoot, "dsh.cmd"), "0.1.5-rc.2", "npm");
+    File.Copy(oldRegistry.StoragePath, Path.Combine(portablePaths.RootDirectory, "instances.json"), overwrite: true);
+
+    var loadedPortable = portableRegistry.Load();
+    var expectedPortableHome = Path.GetFullPath(portablePaths.GetInstanceDshHome(portableInstance.Id));
+    Check("便携/重定位: 换数据根后实例列表可加载且落到当前根",
+        loadedPortable.Count == 1
+        && string.Equals(loadedPortable[0].DshHome, expectedPortableHome, StringComparison.OrdinalIgnoreCase),
+        loadedPortable.Count == 1 ? loadedPortable[0].DshHome : $"count={loadedPortable.Count}");
+    Check("便携/重定位: 改写结果已落盘（下次启动不再依赖旧根）",
+        File.ReadAllText(portableRegistry.StoragePath, Encoding.UTF8).Contains("portable-root", StringComparison.Ordinal),
+        portableRegistry.StoragePath);
+}
+
+// ===========================================================================
 // 13. 整合包导入（DshPackImportService，#24 第 3 步）——全部在注入的临时数据根里跑
 // ===========================================================================
 {

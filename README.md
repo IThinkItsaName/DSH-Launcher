@@ -50,6 +50,16 @@
 
 前置：**.NET 8 SDK**（本机为全局 `C:\Program Files\dotnet` 8.0.425，**不需要** `DOTNET_ROOT`）。
 
+**运行前置（变更集 164 定稿）**：发布产物是**框架依赖小包**（`DSH Launcher.App.exe`，约 **3.62 MB**）⇒ 目标机器需要 **.NET 8 Desktop Runtime (x64)**。
+这个“安装提醒”由**自检引导器**（`DSH Launcher.exe`，22 KB，.NET Framework 4.8 写，Win10 1903+/Win11 自带）负责：检测不到就弹中文对话框（官方下载页 / `winget install Microsoft.DotNet.DesktopRuntime.8` / 我已安装重试）。
+⇒ **发布物是两个文件**（引导器 + 主程序），别只拷一个；要免装 .NET 的大包用 `-p:SelfContained=true`（约 64.8 MB）。
+
+**便携版（绿色版）布局（变更集 163 起）**：把两个 exe、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
+
+- exe 旁存在 `launcher-data` 目录即启用**便携数据根**（实例、设置、会话、缓存都在这里）；注册文件里的**旧数据根绝对路径会在加载时按当前数据根重定位**（不会因此加载失败，旧数据根可保留作回退）；
+- 便携 Node 会装到 `<数据根>\node`（`NodeRuntimeDetector` 把便携 node 当第一候选）；dsh 运行时固定在 exe 旁的 `run_time`；
+- 仍依赖**系统 WebView2**（常青版）；打包便携 node 与 WebView2 固定版**不做**（用户 2026-09-23 口径：不强制放在一起，以轻量 + 功能为准；详见 `work-log/186` / `187`）。
+
 ```powershell
 cd src\DshLauncher
 
@@ -59,8 +69,15 @@ dotnet build -c Release
 # 仓库自测：纯逻辑、不联网、不开窗口、不碰真实数据（发布前必跑）
 dotnet run --project ..\..\tests\DshLauncher.SelfTest\DshLauncher.SelfTest.csproj -c Release
 
-# 发布（单文件自包含 → 仓库 dist\）
+# 发布（默认：框架依赖小包 → dist\DSH Launcher.App.exe，约 3.62 MB；目标机需装 .NET 8 Desktop Runtime）
 dotnet publish DshLauncher.csproj -c Release -o ..\..\dist
+
+# 引导器（发布物两个文件！拷到 dist 后整个目录一起发，入口是 DSH Launcher.exe）
+dotnet build ..\DshLauncher.Bootstrapper\DshLauncher.Bootstrapper.csproj -c Release
+copy ..\DshLauncher.Bootstrapper\bin\Release\net48\"DSH Launcher.exe" ..\..\dist\
+
+# 需要「免装 .NET 的大包」时（自包含，约 64.8 MB；压缩按 SelfContained 条件自动开启）
+dotnet publish DshLauncher.csproj -c Release -o ..\..\dist -p:SelfContained=true
 ```
 
 > - ⚠️ **发布前先停掉运行中的 DSH Launcher**，否则 `dist` 里的 exe 被锁 → `MSB4018`。
@@ -83,8 +100,8 @@ dsh-launcher-dev/
 
 | 文档 | 内容 |
 |---|---|
-| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **159 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
-| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **101 条**用户可见行为差异 |
+| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **165 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
+| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **107 条**用户可见行为差异 |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | 三层验证（构建 / 仓库自测 / 端到端 harness）与发布前清单 |
 | [docs/UI-DESIGN.md](docs/UI-DESIGN.md) | UI 规范：颜色令牌、字号阶梯、圆角、按钮分级、图标注册表 |
 | [docs/DSH_CONTRACT_INVENTORY.md](docs/DSH_CONTRACT_INVENTORY.md) | 与上游 dsh 的契约清单（会话格式 / 文件名 / CLI / 运行时布局…）及哨兵 |

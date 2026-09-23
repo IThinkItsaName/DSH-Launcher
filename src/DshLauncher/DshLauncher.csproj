@@ -6,25 +6,42 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>DSH Launcher</AssemblyName>
+    <!-- 主程序改名带 .App（变更集 165）：入口 exe 名字留给自检引导器（DSH Launcher.exe）。
+         同目录、仅文件名不同 ⇒ AppContext.BaseDirectory 不变，
+         run_time / launcher-data / WebView2 缓存等路径逻辑完全不受影响。 -->
+    <AssemblyName>DSH Launcher.App</AssemblyName>
     <RootNamespace>DshLauncher</RootNamespace>
     <ApplicationTitle>DSH Launcher</ApplicationTitle>
     <ApplicationIcon>Assets\DSHLauncher.ico</ApplicationIcon>
-    <Version>1.0.7</Version>
-    <FileVersion>1.0.7.0</FileVersion>
-    <AssemblyVersion>1.0.7.0</AssemblyVersion>
+    <Version>1.0.8</Version>
+    <FileVersion>1.0.8.0</FileVersion>
+    <AssemblyVersion>1.0.8.0</AssemblyVersion>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <!-- 发布形态：自包含单文件（内含 .NET 8 运行时，免安装/免管理员）。
-         写在工程里，保证 `dotnet publish` 与 VS 发布都得到同样的可独立运行产物，
-         不会误发成需要另装 .NET 8 Desktop Runtime 的多文件版本。 -->
-    <SelfContained>true</SelfContained>
+    <!-- 发布形态（变更集 161 → 162 自包含 → 164 定稿：框架依赖小包）。
+         默认 `SelfContained=false`：不把 .NET 8 运行时打进 exe，产物约 **3.6 MB**（`dist` 里
+         只有一个 exe）。代价是目标机器需要 .NET 8 Desktop Runtime (x64) ——
+         这个“安装提醒”由 **自检引导器**（变更集 165：极小的 .NET Framework 4.8 版
+         `DSH Launcher.exe`）负责：检测不到就弹中文对话框给下载页/winget 命令，
+         检测到才拉起主程序 `DSH Launcher.App.exe`。
+         用户 2026-09-23 的取舍：不做 64.8 MB 的自包含（绿色便携版方案见
+         `work-log/186`，暂缓），改为“小包 + 安装提醒”。
+         两个形态都保留：
+           * 默认（框架依赖小包）：`dotnet publish -c Release -o dist`
+           * 免装 .NET 的大包：`dotnet publish -c Release -o dist -p:SelfContained=true`
+             （约 64.8 MB；压缩按 SelfContained 条件开启，FDD 下压缩会报 NETSDK1176）
+         写成单文件（原生库内嵌）；`SatelliteResourceLanguages` 与上游 v1.2.4 对齐
+         （只保留中英语言资源，自包含形态下实测可省约 5 MB）。 -->
+    <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <EnableCompressionInSingleFile Condition="'$(SelfContained)' == 'true'">true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en;zh-Hans;zh-Hant</SatelliteResourceLanguages>
+    <!-- 不把 NuGet 包自带的 XML 文档随引用拷到产物目录：dist 里只保留一个 exe。 -->
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
   </PropertyGroup>
 
   <ItemGroup>

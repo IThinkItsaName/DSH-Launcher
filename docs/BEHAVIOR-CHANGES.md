@@ -105,3 +105,8 @@
 100. **第二个中文插件源（可选）**：设置里可单独启用 dshfind.com（在线约 1.4 万条，自动排除已归档），来源名里带官方/精选/星标/标签
 101. **来源管理只剩一处**：唯一固定来源是 GitHub（awesome 目录）；两个中文源作为预置条目躺在自定义列表里，开关/删除/测试都在同一处（默认停用）
 102. **实例里的 MCP 服务器真的会挂上了**：以往添加的 MCP server 其实没被 dsh 加载（写进 `launcher.patch.yml` 的条目缺 `insert`，dsh 按方言只当「改已存在条目」，找不到就静默跳过），表现为 MCP 工具消失且无报错；现在改为 `insert` 列表，重启实例后 dsh 会真正拉起该 server，stdio 的 `command`/`args`/`cwd`/`env` 全部生效。
+103. **exe 从 69.5 MB 降到 3.6 MB（代价：目标机要装 .NET 8 Desktop Runtime）**：发布形态从「自包含单文件」改成「框架依赖单文件」——exe 里不再打包 .NET 8 运行时，`dist` 里只有一个约 3.6 MB 的 `DSH Launcher.exe`（顺带去掉旁边 3 个 WebView2 文档文件）。代价是目标机器需预装 .NET 8 Desktop Runtime (x64)；缺它时由 .NET apphost 弹出官方「You must install .NET」提示与下载链接，不会静默失败。想恢复「免装运行时」的大包：`dotnet publish -p:SelfContained=true`（约 69.5 MB）。
+104. **exe 默认改回自包含（免装 .NET），并裁掉多余语言资源**：为了做绿色便携版，默认发布产物又变回**一个 64.8 MB 的自包含 exe**（.NET 8 运行时在里头，目标机不用装 .NET）；同时按上游口径裁剪 `SatelliteResourceLanguages`（只留中英文），比原来的自包含包小约 4.7 MB。想要小体积（3.6 MB）仍可显式打框架依赖包，但那种包需要机器预装 .NET 8 Desktop Runtime。
+105. **便携数据根（绿色版）：整个文件夹可拷走，历史路径不会让实例列表加载失败**：exe 旁建一个 `launcher-data` 目录即启用便携数据根（实例/设置/会话/缓存都放这里，便携 Node 也会装到 `launcher-data/node`）；注册文件里记的旧数据根绝对路径会在加载时按当前数据根**重定位**并落盘。旧数据根原样保留，删掉 `launcher-data` 就回到默认数据根。
+106. **默认产物回到 3.62 MB 的小包（不再随包带 .NET 运行时）**：exe 里不再打包 .NET，体积从 64.8 MB 回到 **3.62 MB**；代价是目标机器需要 .NET 8 Desktop Runtime（由下面的引导器负责提醒）。想要免装 .NET 的机器仍可让开发者打出 64.8 MB 的自包含包。
+107. **新增 22 KB 的「自检引导器」，缺运行时会弹中文提醒**：双击的入口 `DSH Launcher.exe` 是一个极小的检查器（.NET Framework 4.8，系统自带）：检测到 .NET 8 Desktop Runtime 就直接启动主程序 `DSH Launcher.App.exe`；检测不到就弹中文对话框，给出一键打开官方下载页、复制 `winget install Microsoft.DotNet.DesktopRuntime.8`、以及「我已安装，重试」。因此发布物是**两个文件**（引导器 + 主程序），别再只拷一个。

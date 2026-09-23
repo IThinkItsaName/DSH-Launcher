@@ -24,6 +24,7 @@ public static class ErrorCodes
     public const string E1015 = "E1015"; // 启动健康四层证据判定
     public const string E1016 = "E1016"; // 崩溃恢复（自动重启/冷却关闭/现场记录）
     public const string E1017 = "E1017"; // 逐插件定位（二分禁用试验）
+    public const string E1018 = "E1018"; // 实例路径按当前数据根重定位（便携数据根）
 
     // E2xxx 插件 / 扩展
     public const string E2001 = "E2001"; // 插件依赖自检发现异常
@@ -61,6 +62,7 @@ public static class ErrorCodes
         E1015 => "启动健康检查判定失败（进程/日志/HTTP 证据见详情）。",
         E1016 => "实例崩溃（按策略自动重启/冷却关闭，现场已记录）。",
         E1017 => "逐插件定位失败/未收敛（隔离 profile 试验）。",
+        E1018 => "实例路径已按当前数据根重定位（便携数据根：整个文件夹被拷到别处，或启用了 exe 旁 launcher-data）。",
         E2001 => "插件依赖自检发现异常（核心包混入 profile / 依赖缺失等）。",
         E2002 => "插件更新检查失败（registry 不可达或响应异常）。",
         E2003 => "批量更新部分插件失败（其余插件已更新）。",

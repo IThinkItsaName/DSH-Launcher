@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 自检引导器（变更集 165）：
+       产品主程序是框架依赖小包（约 3.6 MB，需要 .NET 8 Desktop Runtime）。
+       缺运行时时主程序**根本起不来**（连自己的 UI 都没有），所以"安装提醒"只能放在
+       一个能独立运行的外部程序里 —— 这里选 .NET Framework 4.8：
+       Windows 10 1903+ / Windows 11 自带该框架，引导器本体只有几十 KB。
+       它只做三件事：检测运行时装没装 → 没装就弹中文对话框（下载页 / winget 命令）→
+       装了就把同目录的主程序 DSH Launcher.App.exe 拉起来。 -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>DSH Launcher</AssemblyName>
+    <RootNamespace>DshLauncher.Bootstrapper</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ApplicationIcon>..\DshLauncher\Assets\DSHLauncher.ico</ApplicationIcon>
+    <Version>1.0.8</Version>
+    <FileVersion>1.0.8.0</FileVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <SatelliteResourceLanguages>en;zh-Hans;zh-Hant</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- net48 目标包（只需还原期引用；.NET Framework 4.8 运行时时由 Windows 自带） -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

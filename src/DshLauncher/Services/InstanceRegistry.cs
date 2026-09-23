@@ -39,6 +39,7 @@ public sealed class InstanceRegistry
                 ?? new List<ManagerInstance>();
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             var validated = new List<ManagerInstance>(entries.Count);
+            var rebased = false;
             foreach (var entry in entries)
             {
                 if (entry is null)
@@ -47,6 +48,7 @@ public sealed class InstanceRegistry
                 }
 
                 var safe = ValidateStoredEntry(entry);
+            rebased |= !string.Equals(entry.DshHome, safe.DshHome, StringComparison.Ordinal);
                 if (!seenIds.Add(safe.Id))
                 {
                     throw new InvalidDataException($"实例注册文件包含重复 ID：{safe.Id}");
@@ -56,7 +58,7 @@ public sealed class InstanceRegistry
             }
 
             var deduplicated = DeduplicateImportedInstances(validated);
-            if (deduplicated.Count != validated.Count)
+            if (deduplicated.Count != validated.Count || rebased)
             {
                 Save(deduplicated);
             }
@@ -202,7 +204,19 @@ public sealed class InstanceRegistry
         var dshHome = Path.GetFullPath(entry.DshHome);
         if (!string.Equals(dshHome, expectedHome, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"实例 {entry.Id} 的 DSH_HOME 不在 Launcher 隔离目录中。");
+            // 便携数据根重定位（变更集 163）：注册文件里记的是“写入当时那个数据根”下的隔离目录。
+            // 整个文件夹被拷到别处、或启用 exe 旁 launcher-data 之后，只要它仍然形如
+            // <某数据根>/instances/<本实例 id>/dsh-home，就重定位到当前数据根；
+            // 不满足这个结构的一律按原样拒绝，避免把任意路径当成实例的 DSH_HOME。
+            var rebasedHome = TryRebaseInstanceHome(entry.DshHome, entry.Id, expectedHome);
+            if (rebasedHome is null)
+            {
+                throw new InvalidDataException($"实例 {entry.Id} 的 DSH_HOME 不在 Launcher 隔离目录中。");
+            }
+
+            LauncherLog.Info("实例 DSH_HOME 已按当前数据根重定位（便携数据根）。", ErrorCodes.E1018,
+                new { instance = entry.Id, from = dshHome, to = rebasedHome });
+            dshHome = rebasedHome;
         }
 
         if (IsReparsePoint(dshHome))
@@ -236,6 +250,42 @@ public sealed class InstanceRegistry
             LastError = error,
             ImportedFromDshHome = NormalizeOptionalPath(entry.ImportedFromDshHome)
         };
+    }
+
+    /// <summary>
+    /// 便携数据根重定位（变更集 163）：只有形如 &lt;某数据根&gt;\instances\&lt;实例 id&gt;\dsh-home
+    /// 的存储路径才会被改写到 <paramref name="expectedHome"/>；其余返回 null（调用方照旧拒绝）。
+    /// </summary>
+    internal static string? TryRebaseInstanceHome(string? storedHome, string instanceId, string expectedHome)
+    {
+        if (string.IsNullOrWhiteSpace(storedHome) || string.IsNullOrWhiteSpace(instanceId))
+        {
+            return null;
+        }
+
+        string home;
+        try
+        {
+            home = Path.GetFullPath(storedHome.Trim())
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        var idDirectory = Path.GetDirectoryName(home);
+        var instancesDirectory = idDirectory is null ? null : Path.GetDirectoryName(idDirectory);
+        if (idDirectory is null || instancesDirectory is null)
+        {
+            return null;
+        }
+
+        return string.Equals(Path.GetFileName(home), "dsh-home", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(idDirectory), instanceId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(Path.GetFileName(instancesDirectory), "instances", StringComparison.OrdinalIgnoreCase)
+                ? expectedHome
+                : null;
     }
 
     private static bool IsReparsePoint(string path)

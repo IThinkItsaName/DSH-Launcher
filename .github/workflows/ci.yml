@@ -27,13 +27,22 @@ jobs:
       - name: Restore
         run: dotnet restore src/DshLauncher/DshLauncher.csproj
 
-      # 产品工程是自包含单文件（csproj 内置 SelfContained/PublishSingleFile），
-      # 因此构建与自测都按 win-x64 走。
+      # 产品工程是框架依赖单文件（变更集 161：csproj 里 SelfContained=false + PublishSingleFile），
+      # 因此构建与自测都按 win-x64 走；发布产物 dist\ 里只有一个 exe（约 3.6 MB），
+      # 运行需要目标机预装 .NET 8 Desktop Runtime (x64)。
       - name: Build
         run: dotnet build src/DshLauncher/DshLauncher.csproj -c Release --no-restore
 
       - name: SelfTest（仓库自带纯逻辑自测：命名规则 / 版本比较 / profile / 任务台账 / 存储边界 / 会话代际）
         run: dotnet run --project tests/DshLauncher.SelfTest/DshLauncher.SelfTest.csproj -c Release
 
-      - name: Publish
+      - name: Publish（框架依赖小包 → dist/DSH Launcher.App.exe，变更集 164）
         run: dotnet publish src/DshLauncher/DshLauncher.csproj -c Release -o dist
+
+      # 发布物是两个文件（变更集 165）：DSH Launcher.exe（自检引导器，net48）+ DSH Launcher.App.exe（主程序）
+      - name: Build bootstrapper（自检引导器）
+        run: dotnet build src/DshLauncher.Bootstrapper/DshLauncher.Bootstrapper.csproj -c Release
+
+      - name: Assemble release（拷引导器进 dist）
+        shell: pwsh
+        run: Copy-Item "src/DshLauncher.Bootstrapper/bin/Release/net48/DSH Launcher.exe" "dist/DSH Launcher.exe"

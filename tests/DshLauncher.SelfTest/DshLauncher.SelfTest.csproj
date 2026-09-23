@@ -10,9 +10,10 @@
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- 启动器工程是自包含的（csproj 内置 SelfContained/PublishSingleFile），引用它的工程
-         必须同样自包含，否则报 NETSDK1151。 -->
-    <SelfContained>true</SelfContained>
+    <!-- 不变量：自测工程与产品工程必须**同为自包含或同为非自包含**，否则
+         报 NETSDK1150/NETSDK1151。产品工程自变更集 164 起为框架依赖（小包 3.6 MB），
+         故这里保持一致；若需自包含形态，用 `-p:SelfContained=true` 一次覆盖两个工程。 -->
+    <SelfContained>false</SelfContained>
     <AssemblyName>DshLauncher.SelfTest</AssemblyName>
     <RootNamespace>DshLauncher.SelfTest</RootNamespace>
   </PropertyGroup>
