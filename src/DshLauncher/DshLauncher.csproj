@@ -6,10 +6,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- 主程序改名带 .App（变更集 165）：入口 exe 名字留给自检引导器（DSH Launcher.exe）。
-         同目录、仅文件名不同 ⇒ AppContext.BaseDirectory 不变，
-         run_time / launcher-data / WebView2 缓存等路径逻辑完全不受影响。 -->
-    <AssemblyName>DSH Launcher.App</AssemblyName>
+    <!-- 入口名 = `DSH Launcher`（变更集 169）：单个框架依赖 exe，命名与上游 Release 一致。
+         变更集 165 曾把主程序改名为 `DSH Launcher.App`、把入口名让给 .NET Framework 写的自检引导器；
+         169 退役该默认形态，主程序占回入口名（同目录、仅文件名不同 ⇒ AppContext.BaseDirectory 不变，
+         run_time / launcher-data / WebView2 缓存等路径逻辑完全不受影响）。 -->
+    <AssemblyName>DSH Launcher</AssemblyName>
     <RootNamespace>DshLauncher</RootNamespace>
     <ApplicationTitle>DSH Launcher</ApplicationTitle>
     <ApplicationIcon>Assets\DSHLauncher.ico</ApplicationIcon>
@@ -24,11 +25,15 @@
     <!-- 发布形态（变更集 161 → 162 自包含 → 164 定稿：框架依赖小包）。
          默认 `SelfContained=false`：不把 .NET 8 运行时打进 exe，产物约 **3.6 MB**（`dist` 里
          只有一个 exe）。代价是目标机器需要 .NET 8 Desktop Runtime (x64) ——
-         这个“安装提醒”由 **自检引导器**（变更集 165：极小的 .NET Framework 4.8 版
-         `DSH Launcher.exe`）负责：检测不到就弹中文对话框给下载页/winget 命令，
-         检测到才拉起主程序 `DSH Launcher.App.exe`。
+         缺运行时的提示交给**系统**：Windows 上由 .NET apphost 弹官方对话框（"You must install .NET"
+         + 下载链接；产物内按 UTF-16LE 可命中该串）。
+         可选的"中文提醒 + 三条路找运行时 + 一键下载便携运行时"那套源码仍在
+         `src/DshLauncher.Bootstrapper/`（变更集 165/168），需要发"两个文件"版本时：
+           1) 发布主程序时加 `-p:AssemblyName="DSH Launcher.App"`（把入口名让给引导器）
+           2) `dotnet build src/DshLauncher.Bootstrapper/DshLauncher.Bootstrapper.csproj -c Release`，
+              产物改名为 `DSH Launcher.exe`
          用户 2026-09-23 的取舍：不做 64.8 MB 的自包含（绿色便携版方案见
-         `work-log/186`，暂缓），改为“小包 + 安装提醒”。
+         `work-log/186`，暂缓）。
          两个形态都保留：
            * 默认（框架依赖小包）：`dotnet publish -c Release -o dist`
            * 免装 .NET 的大包：`dotnet publish -c Release -o dist -p:SelfContained=true`

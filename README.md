@@ -50,9 +50,9 @@
 
 前置：**.NET 8 SDK**（本机为全局 `C:\Program Files\dotnet` 8.0.425，**不需要** `DOTNET_ROOT`）。
 
-**运行前置（变更集 164 定稿）**：发布产物是**框架依赖小包**（`DSH Launcher.App.exe`，约 **3.62 MB**）⇒ 目标机器需要 **.NET 8 Desktop Runtime (x64)**。
-这个“安装提醒”由**自检引导器**（`DSH Launcher.exe`，22 KB，.NET Framework 4.8 写，Win10 1903+/Win11 自带）负责：检测不到就弹中文对话框（官方下载页 / `winget install Microsoft.DotNet.DesktopRuntime.8` / 我已安装重试）。
-⇒ **发布物是两个文件**（引导器 + 主程序），别只拷一个。
+**运行前置（变更集 169 定稿）**：发布产物是**单个框架依赖 exe**（`DSH Launcher.exe`，约 **3.62 MB**）⇒ 目标机器需要 **.NET 8 Desktop Runtime (x64)**。
+缺运行时的提醒交给**系统**：Windows 上由 .NET apphost 弹官方对话框（"You must install .NET"，含下载链接；本机**未实测**，需要一台未装 .NET 8 的机器）。
+变更集 165–168 的**中文提醒 + 三条路找运行时 + 一键下载便携运行时**源码仍保留在 `src/DshLauncher.Bootstrapper/`（可选形态，不是默认），要发带中文提醒的两个文件版本见下方发布命令。
 
 **发给用户时怎么选（两种包，同一份源码；work-log/191）**：
 
@@ -63,12 +63,12 @@
 
 自包含包已做过单文件压缩（未压缩 157.6 MB）与语言资源裁剪，**再小不下去**：WPF 不支持裁剪（`PublishTrimmed` 直接报 `NETSDK1175`）。
 三个已知边界（前两条是**未做**的可选增强）：
-1. 未声明 `RollForward` ⇒ **只认 .NET 8.x**：机器上装的是 .NET **9/10** Desktop Runtime 时同样会被判"缺失"；要让它们也能跑，需要 `<RollForward>LatestMajor</RollForward>` 且引导器检测放宽到 "≥ 8"。
+1. 未声明 `RollForward` ⇒ **只认 .NET 8.x**：机器上装的是 .NET **9/10** Desktop Runtime 时同样会被判"缺失"；要让它们也能跑，需要 `<RollForward>LatestMajor</RollForward>`（可选引导器的检测也要放宽到 "≥ 8"）。
 2. 运行时必须是 **`Microsoft.WindowsDesktop.App`** 这一支（WPF 要求桌面运行时）；只装控制台运行时（`Microsoft.NETCore.App`）跑不了。
-3. **第三条路（变更集 168 已实现）**：小 exe + **便携运行时**——引导器按「便携 `<exe>/runtime/dotnet` → 系统 → `%USERPROFILE%/.dotnet`」三条路找运行时，便携/用户级命中时注入 `DOTNET_ROOT`(+`_X64`) 再拉起主程序；都缺则对话框可**一键下载便携运行时**（免管理员，约 67 MB 下载 / 162 MB 占用，官方两份 zip 解压即用）。适合"要共享运行时 / 只发 3.6 MB 分发物 / 不愿装任何东西"的场景（见 `work-log/192`、`193`）。
-4. 引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
+3. **第三条路（可选引导器，变更集 168 已实现）**：小 exe + **便携运行时**——引导器按「便携 `<exe>/runtime/dotnet` → 系统 → `%USERPROFILE%/.dotnet`」三条路找运行时，便携/用户级命中时注入 `DOTNET_ROOT`(+`_X64`) 再拉起主程序；都缺则对话框可**一键下载便携运行时**（免管理员，约 67 MB 下载 / 162 MB 占用，官方两份 zip 解压即用）。适合"要共享运行时 / 只发 3.6 MB 分发物 / 不愿装任何东西"的场景（见 `work-log/192`、`193`）。
+4. 可选引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
 
-**便携版（绿色版）布局（变更集 163 起）**：把两个 exe、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
+**便携版（绿色版）布局（变更集 163 起）**：把 `DSH Launcher.exe`、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
 
 - exe 旁存在 `launcher-data` 目录即启用**便携数据根**（实例、设置、会话、缓存都在这里）；注册文件里的**旧数据根绝对路径会在加载时按当前数据根重定位**（不会因此加载失败，旧数据根可保留作回退）；
 - 便携 Node 会装到 `<数据根>\node`（`NodeRuntimeDetector` 把便携 node 当第一候选）；dsh 运行时固定在 exe 旁的 `run_time`；
@@ -83,10 +83,12 @@ dotnet build -c Release
 # 仓库自测：纯逻辑、不联网、不开窗口、不碰真实数据（发布前必跑）
 dotnet run --project ..\..\tests\DshLauncher.SelfTest\DshLauncher.SelfTest.csproj -c Release
 
-# 发布（默认：框架依赖小包 → dist\DSH Launcher.App.exe，约 3.62 MB；目标机需装 .NET 8 Desktop Runtime）
+# 发布（默认：单个框架依赖 exe → dist\DSH Launcher.exe，约 3.62 MB；目标机需装 .NET 8 Desktop Runtime）
 dotnet publish DshLauncher.csproj -c Release -o ..\..\dist
 
-# 引导器（发布物两个文件！拷到 dist 后整个目录一起发，入口是 DSH Launcher.exe）
+# 可选：要“中文提醒 + 三条路找运行时 + 一键下载便携运行时”时，发两个文件（变更集 165/168）
+#   入口名让给引导器：主程序发布时加 -p:AssemblyName="DSH Launcher.App"
+dotnet publish DshLauncher.csproj -c Release -o ..\..\dist -p:AssemblyName="DSH Launcher.App"
 dotnet build ..\DshLauncher.Bootstrapper\DshLauncher.Bootstrapper.csproj -c Release
 copy ..\DshLauncher.Bootstrapper\bin\Release\net48\"DSH Launcher.exe" ..\..\dist\
 
@@ -114,8 +116,8 @@ dsh-launcher-dev/
 
 | 文档 | 内容 |
 |---|---|
-| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **168 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
-| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **110 条**用户可见行为差异 |
+| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **169 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
+| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **111 条**用户可见行为差异 |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | 三层验证（构建 / 仓库自测 / 端到端 harness）与发布前清单 |
 | [docs/UI-DESIGN.md](docs/UI-DESIGN.md) | UI 规范：颜色令牌、字号阶梯、圆角、按钮分级、图标注册表 |
 | [docs/DSH_CONTRACT_INVENTORY.md](docs/DSH_CONTRACT_INVENTORY.md) | 与上游 dsh 的契约清单（会话格式 / 文件名 / CLI / 运行时布局…）及哨兵 |
@@ -146,7 +148,7 @@ dsh-launcher-dev/
 
 ## 已知问题与待办
 
-- **「没装 .NET 又不想装」的用户**：目前只能发**自包含包**（`-p:SelfContained=true`，约 64.8 MB，零安装）；两项可选增强**未做**——① 放宽到 .NET 9/10（`RollForward=LatestMajor` + 引导器检测 ≥ 8）② 用户级免管理员安装（`%USERPROFILE%\.dotnet` + 引导器代设 `DOTNET_ROOT`）。详见 `work-log/191`。
+- **「没装 .NET 又不想装」的用户**：目前只能发**自包含包**（`-p:SelfContained=true`，约 64.8 MB，零安装）；两项可选增强**未做**——① 放宽到 .NET 9/10（`RollForward=LatestMajor` + 可选引导器检测 ≥ 8）② 用户级免管理员安装（`%USERPROFILE%\.dotnet` + 引导器代设 `DOTNET_ROOT`）。详见 `work-log/191`。
 - `MainWindow.OnClosing` 在窗口关闭期间偶发 `InvalidOperationException`（疑为关闭期间仍有异步回调操作窗口可见性），待复现定位。
 - 版本下载源切「国内镜像」的真实下载尚未在本机验证（本机已有相关版本，不触发下载）。
 - 150% / 200% DPI 未逐屏验收（当前以 125% 为基准）。

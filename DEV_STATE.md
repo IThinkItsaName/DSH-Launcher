@@ -18,7 +18,7 @@
 - 本轮新增：Plugin 安装、更新、卸载和手动安装失败会先使用现有 web profile 回档，再生成未脱敏的本地诊断 ZIP；报告保留完整错误、`.credentials.yaml` 和选定配置，排除会话文件、`node_modules` 与运行依赖。若当前 DSh 可用，Launcher 会自动打开或复用 Chat，发送报告路径和继续排查安装的指令。
 
 - 本轮代码已实现：Plugin 与 Skill 分类切换分别保存并恢复列表滚动位置；`.dshpack` 导入只从当前 Launcher 设置的 DSh 安装位置解析运行时，不再沿用整合包或模板的 `RootPath`；检测到 DSH Desktop 入口的版本可在版本设置中绑定“打开窗口”，启动页保留独立的“Launcher 启动”按钮；已安装 Plugin 列表对名称和描述单行省略，并明确显示“已启用/已禁用”。
-- .NET 8 WPF Launcher，目标 Windows x64；发布版为**框架依赖小包**（变更集 164 定稿：`DSH Launcher.App.exe` 约 3.62 MB）+ **极小自检引导器**（变更集 165：`DSH Launcher.exe` 22 KB，缺 .NET 8 Desktop Runtime 时弹中文提醒），不内置 Node.js、npm、pnpm 或 DSh（便携数据根见 163；便携 node / WebView2 固定版暂缓）。
+- .NET 8 WPF Launcher，目标 Windows x64；发布版为**单个框架依赖 exe**（变更集 169 定稿：`DSH Launcher.exe` 约 3.62 MB，需目标机装 .NET 8 Desktop Runtime (x64)；缺运行时由 .NET apphost 弹系统官方对话框），不内置 Node.js、npm、pnpm 或 DSh（便携数据根见 163；便携 node / WebView2 固定版暂缓）。可选的中文提醒引导器（变更集 165/168：三条路找运行时 + 一键下载便携运行时）源码保留在 `src/DshLauncher.Bootstrapper/`。
 - 主窗口采用 PCL2 参考的信息层级：启动、扩展、Agent、对话和设置在主窗口内切换，并移除各模块重复的大号页标题。启动页标题栏左侧显示 `DSH Launcher`；扩展和 Agent 页在同一位置改为当前实例选择器，可下拉快速切换并用绿/灰/红圆点显示运行、停止和错误状态，点击实例名称直接进入该版本的插件管理。Chat WebView2 为无 Owner 窗口，使用独立 AppUserModelID 和黑色 DeepSeek 图标，在任务栏中与 Launcher 分组分离。
 - 标题栏实例下拉已改为紧凑圆角菜单；从扩展或 Agent 进入版本设置后，左上角显示返回原页面的按钮。启动页全部实例支持双击：停止实例复用主启动流程，已运行或 Attached 实例直接打开现有 Web UI。
 - 启动页先从本地注册文件立即显示全部实例；界面恢复响应后再核对遗留运行状态并扫描 DSh/Node。左侧为固定窄度的当前实例状态、重命名、实例设置和启动/停止/重启操作，右侧为更宽的全部实例列表与版本控制入口；左右容器高度解耦，实例列表在右栏内部滚动。最近使用时间仍用于启动时默认选择，不再限制启动页显示数量。
