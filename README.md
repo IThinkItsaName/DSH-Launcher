@@ -100,8 +100,8 @@ dsh-launcher-dev/
 
 | 文档 | 内容 |
 |---|---|
-| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **166 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
-| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **108 条**用户可见行为差异 |
+| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **167 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
+| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **109 条**用户可见行为差异 |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | 三层验证（构建 / 仓库自测 / 端到端 harness）与发布前清单 |
 | [docs/UI-DESIGN.md](docs/UI-DESIGN.md) | UI 规范：颜色令牌、字号阶梯、圆角、按钮分级、图标注册表 |
 | [docs/DSH_CONTRACT_INVENTORY.md](docs/DSH_CONTRACT_INVENTORY.md) | 与上游 dsh 的契约清单（会话格式 / 文件名 / CLI / 运行时布局…）及哨兵 |

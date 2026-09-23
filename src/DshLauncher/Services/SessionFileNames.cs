@@ -14,11 +14,23 @@ namespace DshLauncher.Services;
 internal static class SessionFileNames
 {
     /// <summary>
-    /// 启动器已核对过的最高会话格式版本（= dsh 0.1.5-rc 的 <c>SESSION_FORMAT_VERSION</c>）。
-    /// 上游发布更高版本时，harness 的契约哨兵会失败，提醒先核对格式再放开；
-    /// 启动器本体按“任意版本”宽容处理，不依赖该常量做判断。
+    /// 启动器已核对过的最高会话格式版本（变更集 167：3 → 4）。
+    /// 语义是“**已核对范围**”，不是“必须等于已装运行时”：
+    /// <list type="bullet">
+    /// <item>上游若越过这个数字，harness 的契约哨兵（C1）应报警，提醒先核对格式再放开；</item>
+    /// <item>**已装运行时**低于或等于这个数字都是正常的（旧运行时写旧版本日志）；</item>
+    /// <item>启动器本体不依赖该常量做判断：它不解释事件体，只按会话头里的 <c>version</c>
+    /// 给文件命名（见 <see cref="ConversationService"/> 顶部注释）。</item>
+    /// </list>
+    /// <para>
+    /// v4（2026-09-17 上游）经核对：v3→v4 只把**头部 <c>version</c> 由 3 改成 4**，
+    /// “all other logical header fields remain unchanged”（上游规范
+    /// <c>packages/session/session-format-v3-to-v4/README.md</c> 的 Header and framing 表）；
+    /// 其余变化都在**记录体**里（工具角色结果、producer 来源、**父目录补全** parent catalog completion、
+    /// 引用重映射）——启动器不读记录体，所以只需放开版本号。
+    /// </para>
     /// </summary>
-    public const int KnownMaxFormatVersion = 3;
+    public const int KnownMaxFormatVersion = 4;
 
     private const string Stem = "session";
     private const string JsonlSuffix = ".jsonl";

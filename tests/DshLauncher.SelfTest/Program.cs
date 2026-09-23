@@ -61,7 +61,13 @@ static string SessionHeader(int version, string id) =>
 Check("naming/会话文件名解析：v0 不带标签、vN 带标签、zstd 编码",
     SessionFileNames.TryParse("session.jsonl", out var v0, out var c0) && v0 == 0 && !c0
     && SessionFileNames.TryParse("session.v3.jsonl.zstd", out var v3, out var c3) && v3 == 3 && c3
-    && SessionFileNames.TryParse("session.v10.jsonl", out var v10, out _) && v10 == 10);
+    && SessionFileNames.TryParse("session.v10.jsonl", out var v10, out _) && v10 == 10
+    // 变更集 167：v4（上游 v3→v4 只把头部 version 3 → 4，启动器不读记录体）
+    && SessionFileNames.TryParse("session.v4.jsonl", out var v4n, out var c4n) && v4n == 4 && !c4n
+    && SessionFileNames.TryParse("session.v4.jsonl.zstd", out var v4nz, out var c4nz) && v4nz == 4 && c4nz
+    && SessionFileNames.Build(4, false) == "session.v4.jsonl"
+    && SessionFileNames.Build(4, true) == "session.v4.jsonl.zstd"
+    && SessionFileNames.KnownMaxFormatVersion >= 4);
 Check("naming/非 canonical 名字必须被拒（v0 标签 / 多余后缀 / 大小写无关但格式固定）",
     !SessionFileNames.TryParse("session.v0.jsonl", out _, out _)
     && !SessionFileNames.TryParse("session.v3.jsonl.bak", out _, out _)
@@ -77,8 +83,9 @@ Directory.CreateDirectory(generationDirectory);
 File.WriteAllText(Path.Combine(generationDirectory, "session.jsonl"), "{}", Encoding.UTF8);
 File.WriteAllText(Path.Combine(generationDirectory, "session.v2.jsonl"), "{}", Encoding.UTF8);
 File.WriteAllText(Path.Combine(generationDirectory, "session.v3.jsonl.zstd"), "{}", Encoding.UTF8);
+File.WriteAllText(Path.Combine(generationDirectory, "session.v4.jsonl"), "{}", Encoding.UTF8);
 Check("naming/目录内取最高代际（忽略 v0 与普通文件）",
-    SessionFileNames.HighestGeneration(generationDirectory) == 3
+    SessionFileNames.HighestGeneration(generationDirectory) == 4
     && SessionFileNames.HighestGeneration(Path.Combine(scratch, "missing")) == -1);
 
 Check("naming/代际支持判定：自身证据（会话文件 / catalog 包）优先，其次版本号 >= 0.1.5",
@@ -249,12 +256,24 @@ Directory.CreateDirectory(legacyDirectory);
 var legacySession = Path.Combine(legacyDirectory, "session.jsonl");
 File.WriteAllText(legacySession, SessionHeader(0, "legacy") + "\n{\"type\":\"message\"}\n", Encoding.UTF8);
 
+// 变更集 167：v4 会话（头部 version=4，其余字段与 v3 相同）必须能被列出并标为有效。
+var v4Directory = Path.Combine(conversationHome, "sessions", "--C-work-demo--", "s4");
+Directory.CreateDirectory(v4Directory);
+var v4Session = Path.Combine(v4Directory, "session.v4.jsonl");
+File.WriteAllText(v4Session, SessionHeader(4, "s4") + "\n{\"type\":\"message\"}\n", Encoding.UTF8);
+
 var conversations = new ConversationService(new LauncherPaths(Path.Combine(scratch, "conversation-paths")));
 var entries = conversations.List(conversationInstance);
 Check("conversation/只列最高代际（同一会话不会列成多行），v0 会话照常列出",
     entries.Any(entry => entry.FullPath == Path.GetFullPath(newerGeneration) && entry.HasValidHeader && entry.SessionId == "s1")
     && entries.All(entry => entry.FullPath != Path.GetFullPath(olderGeneration))
     && entries.Any(entry => entry.FullPath == Path.GetFullPath(legacySession)));
+Check("conversation/v4 会话（变更集 167）能被列出：有效头部 + 代际版本 = 4",
+    entries.Any(entry => entry.FullPath == Path.GetFullPath(v4Session)
+        && entry.HasValidHeader
+        && entry.SessionId == "s4"
+        && entry.GenerationVersion == 4),
+    string.Join("、", entries.Select(entry => Path.GetFileName(entry.FullPath) + ":v" + entry.GenerationVersion)));
 
 // ===========================================================================
 // 7. 长文本收敛（弹窗不再超屏）
