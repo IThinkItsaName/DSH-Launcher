@@ -65,7 +65,8 @@
 三个已知边界（前两条是**未做**的可选增强）：
 1. 未声明 `RollForward` ⇒ **只认 .NET 8.x**：机器上装的是 .NET **9/10** Desktop Runtime 时同样会被判"缺失"；要让它们也能跑，需要 `<RollForward>LatestMajor</RollForward>` 且引导器检测放宽到 "≥ 8"。
 2. 运行时必须是 **`Microsoft.WindowsDesktop.App`** 这一支（WPF 要求桌面运行时）；只装控制台运行时（`Microsoft.NETCore.App`）跑不了。
-3. 引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
+3. **第三条路（已实验证实可行，未实现）**：小 exe + **便携运行时**——把运行时以纯文件放在别处（如 `<exe 目录>/runtime/dotnet`），引导器注入 `DOTNET_ROOT` 再拉起主程序；实测有效（进程序加载的 `coreclr` 从系统目录切到便携目录）。适合"要共享运行时/只发 3.6 MB 分发物/不愿装任何东西"的场景；实现只在引导器（见 `work-log/192`）。
+4. 引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
 
 **便携版（绿色版）布局（变更集 163 起）**：把两个 exe、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
 
