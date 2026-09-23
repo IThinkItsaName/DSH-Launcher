@@ -861,6 +861,63 @@ Check("packarchive/配对校验：v5 配 v3 通过、配 v2 拒载",
 }
 
 // ===========================================================================
+// 12c. 运行时安装：非 global + 入口 shim + 依赖树可达性自检（变更集 166）
+// ===========================================================================
+{
+    // (1) npm 命令不再带 --global，且工作目录就是安装目录
+    var installDir = Path.Combine(scratch, "install-root");
+    Directory.CreateDirectory(installDir);
+    var startInfo = DshInstallService.CreateStartInfo(
+        "npm.cmd", "https://registry.npmmirror.com", installDir, "0.1.5-rc.2");
+    Check("安装/166: npm 命令不再用 --global（全局模式会装出深嵌套依赖树）",
+        !startInfo.Arguments.Contains("--global", StringComparison.Ordinal)
+        && startInfo.Arguments.Contains("install @deepseek-ai/dsh@0.1.5-rc.2", StringComparison.Ordinal)
+        && startInfo.Arguments.Contains("--registry=https://registry.npmmirror.com", StringComparison.Ordinal),
+        startInfo.Arguments);
+    Check("安装/166: 工作目录 = 安装目录（普通安装以 cwd 为项目根）",
+        string.Equals(Path.GetFullPath(startInfo.WorkingDirectory), Path.GetFullPath(installDir), StringComparison.OrdinalIgnoreCase),
+        startInfo.WorkingDirectory);
+    Check("安装/166: 不再设 NPM_CONFIG_PREFIX（那是 global 模式的用法）",
+        !startInfo.Environment.ContainsKey("NPM_CONFIG_PREFIX"));
+
+    // (2) 入口 shim：把 .bin 里的“上一级”目标改写成 node_modules 内，并落到安装目录根
+    var binDir = Path.Combine(installDir, "node_modules", ".bin");
+    Directory.CreateDirectory(binDir);
+    File.WriteAllText(
+        Path.Combine(binDir, "dsh.cmd"),
+        "@ECHO off" + Environment.NewLine
+        + "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\..\\@deepseek-ai\\dsh\\lib\\bin.js\" %*" + Environment.NewLine,
+        new UTF8Encoding(false));
+    DshInstallService.WriteRuntimeCommandShims(installDir);
+    var rootShimPath = Path.Combine(installDir, "dsh.cmd");
+    var shimText = File.Exists(rootShimPath) ? File.ReadAllText(rootShimPath) : string.Empty;
+    Check("安装/166: 安装目录根出现 dsh.cmd 且目标指向 node_modules 内",
+        File.Exists(rootShimPath)
+        && shimText.Contains("\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js", StringComparison.Ordinal)
+        && !shimText.Contains("\\..\\@deepseek-ai\\dsh", StringComparison.Ordinal));
+
+    // (3) 可达性自检：扁平包通过、深嵌套包（npm --global 的特征）被点名
+    var treeDir = Path.Combine(scratch, "reach-tree");
+    var anchorPkg = Path.Combine(treeDir, "node_modules", "@deepseek-ai", "dsh");
+    Directory.CreateDirectory(Path.Combine(anchorPkg, "lib"));
+    File.WriteAllText(Path.Combine(anchorPkg, "package.json"), "{}", new UTF8Encoding(false));
+
+    var flatPkg = Path.Combine(anchorPkg, "node_modules", "@deepseek-ai", "dsh-sandbox-local");
+    Directory.CreateDirectory(flatPkg);
+    File.WriteAllText(Path.Combine(flatPkg, "package.json"), "{}", new UTF8Encoding(false));
+
+    var nestedPkg = Path.Combine(
+        anchorPkg, "node_modules", "@deepseek-ai", "dsh-base", "node_modules", "@deepseek-ai", "dsh-hidden");
+    Directory.CreateDirectory(nestedPkg);
+    File.WriteAllText(Path.Combine(nestedPkg, "package.json"), "{}", new UTF8Encoding(false));
+
+    var unreachable = DshInstallService.FindUnreachableLayerPackages(treeDir);
+    Check("安装/166: 可达性自检只点名不可达的包（嵌套被抓、扁平不受影响）",
+        unreachable.Count == 1 && unreachable[0] == "@deepseek-ai/dsh-hidden",
+        string.Join("、", unreachable));
+}
+
+// ===========================================================================
 // 13. 整合包导入（DshPackImportService，#24 第 3 步）——全部在注入的临时数据根里跑
 // ===========================================================================
 {

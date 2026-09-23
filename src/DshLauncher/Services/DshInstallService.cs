@@ -104,12 +104,47 @@ public sealed class DshInstallService
                 cancellationToken);
         }
 
-        return await RunNpmInstallAsync(
+        var floatResult = await RunNpmInstallAsync(
             npmPath,
             packageVersion,
             registry,
             normalizedInstallDirectory,
             cancellationToken);
+        if (!floatResult.IsSuccess || string.IsNullOrWhiteSpace(normalizedInstallDirectory))
+        {
+            return floatResult;
+        }
+
+        var floatPostCheck = EnsureInstalledRuntimeUsable(normalizedInstallDirectory, floatResult.Output);
+        return floatPostCheck ?? floatResult;
+    }
+
+    /// <summary>
+    /// 安装完成后的收尾自检（变更集 166）：补根级入口 shim，并验证依赖树从 dsh 安装锚点
+    /// 完全可达。返回 null 表示一切正常；否则返回带原因的失败结果。
+    /// </summary>
+    private static DshInstallResult? EnsureInstalledRuntimeUsable(string installDirectory, string? output)
+    {
+        try
+        {
+            WriteRuntimeCommandShims(installDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return DshInstallResult.Failure($"写入 DSh 运行时入口失败：{ex.Message}", output: output);
+        }
+
+        var unreachable = FindUnreachableLayerPackages(installDirectory);
+        if (unreachable.Count > 0)
+        {
+            return DshInstallResult.Failure(
+                $"安装出的依赖树不可用：{unreachable.Count} 个插件包从 DSh 安装目录不可达"
+                + $"（例如 {string.Join("、", unreachable.Take(3))}）。"
+                + "这会让实例启动时报 “plugin(s) failed to load”；请删除该运行时目录后重试安装。",
+                output: output);
+        }
+
+        return null;
     }
 
     private static async Task<DshInstallResult> InstallExactVersionAsync(
@@ -149,7 +184,9 @@ public sealed class DshInstallService
 
             PromoteVersionDirectory(stagingDirectory, installDirectory);
             stagingDirectory = null;
-            return result;
+            // 变更集 166：装完补入口 shim + 依赖树可达性自检（不可用则报失败而不是留着坑）。
+            var postCheck = EnsureInstalledRuntimeUsable(installDirectory, result.Output);
+            return postCheck ?? result;
         }
         catch (OperationCanceledException)
         {
@@ -282,6 +319,146 @@ public sealed class DshInstallService
         }
     }
 
+    /// <summary>
+    /// 在安装目录根补 dsh 入口 shim（变更集 166）。npm 的普通安装把 shim 放在
+    /// <c>node_modules/.bin/dsh.cmd</c>，而启动器与运行时探测都期望
+    /// <c>&lt;安装目录&gt;\dsh.cmd</c>（旧实现靠 npm --global 才建在那里）。
+    /// </summary>
+    internal static void WriteRuntimeCommandShims(string installDirectory)
+    {
+        Directory.CreateDirectory(installDirectory);
+        var binShimPath = Path.Combine(installDirectory, "node_modules", ".bin", "dsh.cmd");
+        var rootShimPath = Path.Combine(installDirectory, "dsh.cmd");
+        var content = File.Exists(binShimPath)
+            ? RewriteShimForRoot(File.ReadAllText(binShimPath))
+            : BuildFallbackShim();
+        File.WriteAllText(rootShimPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+    }
+
+    /// <summary>
+    /// 把 <c>node_modules\.bin\dsh.cmd</c> 的目标从“上一级”改成“node_modules 内”，
+    /// 使同一个 shim 放到安装目录根也能用；找不到目标模式时退回自建骨架。
+    /// </summary>
+    internal static string RewriteShimForRoot(string shimText)
+    {
+        const string from = "\\..\\@deepseek-ai\\dsh\\lib\\bin.js";
+        const string to = "\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js";
+        if (string.IsNullOrEmpty(shimText) || !shimText.Contains(from, StringComparison.Ordinal))
+        {
+            return BuildFallbackShim();
+        }
+
+        return shimText.Replace(from, to, StringComparison.Ordinal);
+    }
+
+    /// <summary>自建最小 shim（npm 换 shim 写法时的兜底；ASCII + CRLF）。</summary>
+    internal static string BuildFallbackShim() =>
+        string.Join("\r\n", new[]
+        {
+            "@ECHO off",
+            "GOTO start",
+            ":find_dp0",
+            "SET dp0=%~dp0",
+            "EXIT /b",
+            ":start",
+            "SETLOCAL",
+            "CALL :find_dp0",
+            string.Empty,
+            "IF EXIST \"%dp0%\\node.exe\" (",
+            "  SET \"_prog=%dp0%\\node.exe\"",
+            ") ELSE (",
+            "  SET \"_prog=node\"",
+            "  SET PATHEXT=%PATHEXT:;.JS;=;%",
+            ")",
+            string.Empty,
+            "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js\" %*",
+            string.Empty
+        });
+
+    /// <summary>
+    /// 依赖树可达性自检（变更集 166 的回归门）：树里每个 <c>@deepseek-ai/*</c> 包都必须能
+    /// 从 dsh 安装锚点按 Node 的向上查找规则找到。npm --global 的深层嵌套会让大量包不可达，
+    /// dsh 的插件解析随之失败（实测 120/240）。
+    /// </summary>
+    internal static IReadOnlyList<string> FindUnreachableLayerPackages(string installDirectory)
+    {
+        var anchor = Path.Combine(installDirectory, "node_modules", "@deepseek-ai", "dsh");
+        if (!Directory.Exists(anchor))
+        {
+            return Array.Empty<string>();
+        }
+
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var scopeDirectory in EnumerateScopeDirectories(installDirectory))
+        {
+            foreach (var packageDirectory in Directory.EnumerateDirectories(scopeDirectory))
+            {
+                if (File.Exists(Path.Combine(packageDirectory, "package.json")))
+                {
+                    names.Add("@deepseek-ai/" + Path.GetFileName(packageDirectory));
+                }
+            }
+        }
+
+        var unreachable = new List<string>();
+        foreach (var name in names)
+        {
+            if (!IsResolvableFromAnchor(anchor, name))
+            {
+                unreachable.Add(name);
+            }
+        }
+
+        return unreachable;
+    }
+
+    private static IEnumerable<string> EnumerateScopeDirectories(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            IEnumerable<string> children;
+            try
+            {
+                children = Directory.EnumerateDirectories(current);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var child in children)
+            {
+                if (string.Equals(Path.GetFileName(child), "@deepseek-ai", StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return child;
+                }
+
+                pending.Push(child);
+            }
+        }
+    }
+
+    private static bool IsResolvableFromAnchor(string anchorDirectory, string packageName)
+    {
+        var current = anchorDirectory;
+        while (!string.IsNullOrEmpty(current))
+        {
+            var candidate = Path.Combine(
+                current, "node_modules", packageName.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(Path.Combine(candidate, "package.json")))
+            {
+                return true;
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return false;
+    }
+
     private static bool InstalledVersionMatches(string installDirectory, string packageVersion)
     {
         var packageRoot = DshRuntimeDetector.TryResolvePackageRoot(installDirectory);
@@ -374,7 +551,15 @@ public sealed class DshInstallService
         var packageSpec = string.IsNullOrWhiteSpace(packageVersion)
             ? "@deepseek-ai/dsh"
             : $"@deepseek-ai/dsh@{packageVersion}";
-        var commandArguments = $"install --global {packageSpec}"
+        // 安装方式：**非 global**（变更集 166）。
+         // 原实现是 `npm install --global` + NPM_CONFIG_PREFIX=<安装目录>：好处是 npm 会把
+         // dsh.cmd 直接建到该 prefix 下，坏处是**全局模式的依赖树会深度嵌套** —— 实测那份
+         // 运行时 240 个 @deepseek-ai/* 包里有 **120 个从 dsh 安装锚点不可达**，而 dsh 解析
+         // 层文件里的插件名时够不到它们 ⇒ 实例启动直接崩在
+         // “plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local”。
+         // 改成在安装目录里做普通安装（WorkingDirectory = 安装目录）：依赖树天然扁平、
+         // 可达性 100%；入口 shim 由 WriteRuntimeCommandShims 补到安装目录根。
+        var commandArguments = $"install {packageSpec}"
             + (string.IsNullOrWhiteSpace(registry) ? string.Empty : $" --registry={registry}");
         var startInfo = new ProcessStartInfo
         {
@@ -388,10 +573,10 @@ public sealed class DshInstallService
 
         if (!string.IsNullOrWhiteSpace(installDirectory))
         {
-            // npm on Windows links global command shims directly into this prefix.
-            // Passing the path through the environment avoids cmd.exe quoting and
-            // injection problems for user-selected paths containing shell symbols.
-            startInfo.Environment["NPM_CONFIG_PREFIX"] = installDirectory;
+            // 普通（非 global）安装以工作目录为项目根：npm 把依赖装到
+            // <安装目录>/node_modules，并就地写 package.json / package-lock.json。
+            Directory.CreateDirectory(installDirectory);
+            startInfo.WorkingDirectory = installDirectory;
         }
 
         if (Path.GetExtension(npmPath).Equals(".cmd", StringComparison.OrdinalIgnoreCase)
