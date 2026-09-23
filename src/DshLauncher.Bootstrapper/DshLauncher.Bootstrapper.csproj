@@ -14,7 +14,7 @@
     <AssemblyName>DSH Launcher</AssemblyName>
     <RootNamespace>DshLauncher.Bootstrapper</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <ApplicationIcon>..\DshLauncher\Assets\DSHLauncher.ico</ApplicationIcon>
     <Version>1.0.8</Version>
     <FileVersion>1.0.8.0</FileVersion>
@@ -28,6 +28,13 @@
   <ItemGroup>
     <!-- net48 目标包（只需还原期引用；.NET Framework 4.8 运行时时由 Windows 自带） -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 变更集 168：便携运行时的下载与解压（都是 .NET Framework 自带的程序集，不会增大产物） -->
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
 
 </Project>

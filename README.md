@@ -65,7 +65,7 @@
 三个已知边界（前两条是**未做**的可选增强）：
 1. 未声明 `RollForward` ⇒ **只认 .NET 8.x**：机器上装的是 .NET **9/10** Desktop Runtime 时同样会被判"缺失"；要让它们也能跑，需要 `<RollForward>LatestMajor</RollForward>` 且引导器检测放宽到 "≥ 8"。
 2. 运行时必须是 **`Microsoft.WindowsDesktop.App`** 这一支（WPF 要求桌面运行时）；只装控制台运行时（`Microsoft.NETCore.App`）跑不了。
-3. **第三条路（已实验证实可行，未实现）**：小 exe + **便携运行时**——把运行时以纯文件放在别处（如 `<exe 目录>/runtime/dotnet`），引导器注入 `DOTNET_ROOT` 再拉起主程序；实测有效（进程序加载的 `coreclr` 从系统目录切到便携目录）。适合"要共享运行时/只发 3.6 MB 分发物/不愿装任何东西"的场景；实现只在引导器（见 `work-log/192`）。
+3. **第三条路（变更集 168 已实现）**：小 exe + **便携运行时**——引导器按「便携 `<exe>/runtime/dotnet` → 系统 → `%USERPROFILE%/.dotnet`」三条路找运行时，便携/用户级命中时注入 `DOTNET_ROOT`(+`_X64`) 再拉起主程序；都缺则对话框可**一键下载便携运行时**（免管理员，约 67 MB 下载 / 162 MB 占用，官方两份 zip 解压即用）。适合"要共享运行时 / 只发 3.6 MB 分发物 / 不愿装任何东西"的场景（见 `work-log/192`、`193`）。
 4. 引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
 
 **便携版（绿色版）布局（变更集 163 起）**：把两个 exe、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
@@ -114,8 +114,8 @@ dsh-launcher-dev/
 
 | 文档 | 内容 |
 |---|---|
-| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **167 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
-| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **109 条**用户可见行为差异 |
+| [docs/CHANGESETS.md](docs/CHANGESETS.md) | **168 条**变更集清单（相对上游 v1.0.7）——改了哪些文件、改了什么 |
+| [docs/BEHAVIOR-CHANGES.md](docs/BEHAVIOR-CHANGES.md) | **110 条**用户可见行为差异 |
 | [docs/VERIFICATION.md](docs/VERIFICATION.md) | 三层验证（构建 / 仓库自测 / 端到端 harness）与发布前清单 |
 | [docs/UI-DESIGN.md](docs/UI-DESIGN.md) | UI 规范：颜色令牌、字号阶梯、圆角、按钮分级、图标注册表 |
 | [docs/DSH_CONTRACT_INVENTORY.md](docs/DSH_CONTRACT_INVENTORY.md) | 与上游 dsh 的契约清单（会话格式 / 文件名 / CLI / 运行时布局…）及哨兵 |
