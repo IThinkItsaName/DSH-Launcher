@@ -52,7 +52,20 @@
 
 **运行前置（变更集 164 定稿）**：发布产物是**框架依赖小包**（`DSH Launcher.App.exe`，约 **3.62 MB**）⇒ 目标机器需要 **.NET 8 Desktop Runtime (x64)**。
 这个“安装提醒”由**自检引导器**（`DSH Launcher.exe`，22 KB，.NET Framework 4.8 写，Win10 1903+/Win11 自带）负责：检测不到就弹中文对话框（官方下载页 / `winget install Microsoft.DotNet.DesktopRuntime.8` / 我已安装重试）。
-⇒ **发布物是两个文件**（引导器 + 主程序），别只拷一个；要免装 .NET 的大包用 `-p:SelfContained=true`（约 64.8 MB）。
+⇒ **发布物是两个文件**（引导器 + 主程序），别只拷一个。
+
+**发给用户时怎么选（两种包，同一份源码；work-log/191）**：
+
+| 包 | 命令 | 体积（实测） | 适用人群 |
+|---|---|---|---|
+| **小包**（框架依赖，默认） | `dotnet publish src/DshLauncher/DshLauncher.csproj -c Release -o dist` | **3.62 MB** | 机器已有 .NET 8 Desktop Runtime (x64) |
+| **自包含包**（免装 .NET） | 同上再加 `-p:SelfContained=true` | **64.83 MB**（其中约 62 MB 是 .NET 运行时） | **没装 .NET 又不想装**的人：双击即用、零安装 |
+
+自包含包已做过单文件压缩（未压缩 157.6 MB）与语言资源裁剪，**再小不下去**：WPF 不支持裁剪（`PublishTrimmed` 直接报 `NETSDK1175`）。
+三个已知边界（前两条是**未做**的可选增强）：
+1. 未声明 `RollForward` ⇒ **只认 .NET 8.x**：机器上装的是 .NET **9/10** Desktop Runtime 时同样会被判"缺失"；要让它们也能跑，需要 `<RollForward>LatestMajor</RollForward>` 且引导器检测放宽到 "≥ 8"。
+2. 运行时必须是 **`Microsoft.WindowsDesktop.App`** 这一支（WPF 要求桌面运行时）；只装控制台运行时（`Microsoft.NETCore.App`）跑不了。
+3. 引导器尚未支持**用户级免管理员安装**（官方 `dotnet-install.ps1` 装到 `%USERPROFILE%\.dotnet` + 代设 `DOTNET_ROOT`）。
 
 **便携版（绿色版）布局（变更集 163 起）**：把两个 exe、`run_time`、`launcher-data` 放在同一文件夹里，整个文件夹可拷走：
 
@@ -132,6 +145,7 @@ dsh-launcher-dev/
 
 ## 已知问题与待办
 
+- **「没装 .NET 又不想装」的用户**：目前只能发**自包含包**（`-p:SelfContained=true`，约 64.8 MB，零安装）；两项可选增强**未做**——① 放宽到 .NET 9/10（`RollForward=LatestMajor` + 引导器检测 ≥ 8）② 用户级免管理员安装（`%USERPROFILE%\.dotnet` + 引导器代设 `DOTNET_ROOT`）。详见 `work-log/191`。
 - `MainWindow.OnClosing` 在窗口关闭期间偶发 `InvalidOperationException`（疑为关闭期间仍有异步回调操作窗口可见性），待复现定位。
 - 版本下载源切「国内镜像」的真实下载尚未在本机验证（本机已有相关版本，不触发下载）。
 - 150% / 200% DPI 未逐屏验收（当前以 125% 为基准）。
