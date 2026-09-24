@@ -294,7 +294,15 @@ public sealed class InstanceVersionSwitchService
             return InstanceVersionSwitchResult.Failure("实例正在运行（或为外部连接），请先停止后再更换运行版本。");
         }
 
-        var precheck = Precheck(instance, target, nodeRuntime);
+        // 变更集 175：运行状态只认这一处（_isRunning，由 InstanceRunner 判定）。对象上的
+        // RuntimeStatus 可能因为上一进程遗留/监听延迟而写着 Running，而 SwitchAsync 与重绑
+        // 守卫读的是不同来源 ⇒ 会出现“预检放行、重绑却因对象仍写 Running 而拒绝”，且只能
+        // 报一句无法归因的「目标运行时不完整」。这里先按同一份事实收敛，再往下走。
+        var normalized = instance.RuntimeStatus == InstanceRuntimeStatus.Running
+            ? instance with { RuntimeStatus = InstanceRuntimeStatus.Stopped }
+            : instance;
+
+        var precheck = Precheck(normalized, target, nodeRuntime);
         if (!precheck.CanProceed)
         {
             return InstanceVersionSwitchResult.Failure(string.Join("；", precheck.Warnings));
@@ -302,7 +310,7 @@ public sealed class InstanceVersionSwitchService
 
         // 快照/导出/写台账都是磁盘 I/O，放到后台线程避免卡住 UI（progress 会自动回到创建它的上下文）。
         return await Task.Run(
-            () => SwitchCore(instance, target, precheck, createSnapshot, sessionBackupDirectory, progress, cancellationToken),
+            () => SwitchCore(normalized, target, precheck, createSnapshot, sessionBackupDirectory, progress, cancellationToken),
             cancellationToken);
     }
 
@@ -335,7 +343,10 @@ public sealed class InstanceVersionSwitchService
             var rebound = InstanceRuntimeRebinder.RebindInstalledInstance(instance, target.Runtime, force: true);
             if (rebound is null)
             {
-                return InstanceVersionSwitchResult.Failure("目标运行时不完整，未执行切换。");
+                // 变更集 175：带上具体是哪个守卫不过，避免“目标运行时不完整”这类无法归因的提示。
+                var blocker = InstanceRuntimeRebinder.DescribeBlocker(instance, target.Runtime);
+                return InstanceVersionSwitchResult.Failure(
+                    $"目标运行时不完整，未执行切换（{blocker ?? "原因未识别"}）");
             }
 
             var persisted = _registry.Update(rebound);

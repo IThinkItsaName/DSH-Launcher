@@ -164,6 +164,14 @@ public sealed class DshInstallService
             }
 
             stagingDirectory = CreateVersionStagingDirectory(installDirectory);
+            // 变更集 175：暂存目录必须先成为 npm 认可的项目根。npm 的项目根不是 cwd，
+            // 而是就近向上找的第一个含 package.json 或 node_modules 的祖先；非 global
+            // 安装会在 DSh 安装根留下 package.json，于是这里的 npm 会把包装进共享运行根。
+            PrepareStagingProject(stagingDirectory);
+            var displacedProjectRoot = FindAncestorProjectRoot(stagingDirectory);
+            var displacedBefore = displacedProjectRoot is null
+                ? null
+                : FingerprintProjectRoot(displacedProjectRoot);
             var result = await RunNpmInstallAsync(
                 npmPath,
                 packageVersion,
@@ -173,6 +181,19 @@ public sealed class DshInstallService
             if (!result.IsSuccess)
             {
                 return result;
+            }
+
+            if (displacedProjectRoot is not null
+                && displacedBefore is not null
+                && !string.Equals(
+                    FingerprintProjectRoot(displacedProjectRoot),
+                    displacedBefore,
+                    StringComparison.Ordinal))
+            {
+                return DshInstallResult.Failure(
+                    $"npm 把包装进了安装根「{displacedProjectRoot}」而不是版本目录「{installDirectory}」："
+                    + "共享运行根已被改动，该版本未落位。请核对 npm 行为后重试（并按需重装运行环境）。",
+                    output: result.Output);
             }
 
             if (!InstalledVersionMatches(stagingDirectory, packageVersion))
@@ -277,6 +298,57 @@ public sealed class DshInstallService
             ?? throw new ArgumentException("DSh 安装位置必须有父目录。", nameof(installDirectory));
         Directory.CreateDirectory(parent);
         return Path.Combine(parent, $".{Path.GetFileName(normalized)}.install-{Guid.NewGuid():N}");
+    }
+
+    /// <summary>
+    /// 变更集 175：让暂存目录成为 npm 认可的项目根（自带一个最小 <c>package.json</c>）。
+    /// </summary>
+    internal static void PrepareStagingProject(string stagingDirectory)
+    {
+        Directory.CreateDirectory(stagingDirectory);
+        var manifestPath = Path.Combine(stagingDirectory, "package.json");
+        if (!File.Exists(manifestPath))
+        {
+            File.WriteAllText(
+                manifestPath,
+                "{\"private\":true}",
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        }
+    }
+
+    /// <summary>npm 在暂存目录不是项目根时会挑中的祖先目录（跳过暂存目录本身）。</summary>
+    internal static string? FindAncestorProjectRoot(string stagingDirectory)
+    {
+        var current = Directory.GetParent(Path.GetFullPath(stagingDirectory))?.FullName;
+        while (!string.IsNullOrEmpty(current))
+        {
+            if (File.Exists(Path.Combine(current, "package.json"))
+                || Directory.Exists(Path.Combine(current, "node_modules")))
+            {
+                return current;
+            }
+
+            current = Directory.GetParent(current)?.FullName;
+        }
+
+        return null;
+    }
+
+    /// <summary>项目根指纹（package.json + package-lock.json）：安装后据此判断有没有被 npm 改动。</summary>
+    internal static string FingerprintProjectRoot(string projectRoot) =>
+        FingerprintFile(Path.Combine(projectRoot, "package.json"))
+        + "|"
+        + FingerprintFile(Path.Combine(projectRoot, "package-lock.json"));
+
+    private static string FingerprintFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return "(不存在)";
+        }
+
+        var info = new FileInfo(path);
+        return $"{info.Length}@{info.LastWriteTimeUtc.Ticks}";
     }
 
     internal static void PromoteVersionDirectory(string stagingDirectory, string installDirectory)
@@ -559,7 +631,10 @@ public sealed class DshInstallService
          // “plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local”。
          // 改成在安装目录里做普通安装（WorkingDirectory = 安装目录）：依赖树天然扁平、
          // 可达性 100%；入口 shim 由 WriteRuntimeCommandShims 补到安装目录根。
+        // 变更集 175：显式用 --prefix 钉住项目根。只设 WorkingDirectory 时，只要安装根
+        // 已经有 package.json（非 global 安装的必然产物），npm 就会把包装进安装根。
         var commandArguments = $"install {packageSpec}"
+            + (string.IsNullOrWhiteSpace(installDirectory) ? string.Empty : $" --prefix \"{installDirectory}\"")
             + (string.IsNullOrWhiteSpace(registry) ? string.Empty : $" --registry={registry}");
         var startInfo = new ProcessStartInfo
         {
