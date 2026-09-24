@@ -65,8 +65,9 @@
                               ScrollViewer.VerticalScrollBarVisibility="Auto"
                               ScrollViewer.HorizontalScrollBarVisibility="Auto" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" >
                         <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <!-- 变更集 173：表格行统一走共享 keyed 样式（BasedOn 指向 **keyed** 样式是安全的；
+                                 禁用 BasedOn="{StaticResource {x:Type ListView}}"，见 docs/UI-DESIGN.md）。 -->
+                            <Style TargetType="ListViewItem" BasedOn="{StaticResource TableRowStyle}">
                                 <Setter Property="Padding" Value="4,6" />
                             </Style>
                         </ListView.ItemContainerStyle>

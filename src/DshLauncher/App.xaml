@@ -820,5 +820,42 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- 表格列头与行统一（变更集 173，B3）。
+             为什么用 **keyed 样式 + 逐处显式挂载**：本仓已两次因“隐式样式 + BasedOn={StaticResource {x:Type ...}}”
+             在 XamlParseException 上翻车（变更集 134 ListView、138 Button，见 docs/UI-DESIGN.md 禁令）。
+             因此这里只提供命名样式，由各表自己 `ColumnHeaderContainerStyle` / `ItemContainerStyle` 挂上。 -->
+        <Style x:Key="TableColumnHeaderStyle" TargetType="GridViewColumnHeader">
+            <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
+            <!-- 字重依据 UI-DESIGN「可交互/需要强调的小字用 12px + SemiBold」；列头可拖拽/排序 -->
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="48" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+        <Style x:Key="TableRowStyle" TargetType="ListViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource HoverSurfaceBrush}" />
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SubtleSurfaceBrush}" />
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Application.Resources>
 </Application>

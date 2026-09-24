@@ -174,7 +174,12 @@
 - **列宽自适应**：`GridViewColumn.Width` 是**像素 `double`**——**没有 `MinWidth`，也不支持星号比例**。做法：XAML 写设计初值，窗口 `SizeChanged`/`Loaded` 时由代码把"最小宽之外的剩余宽度"按权重分配（`ConversationWindow.DistributeColumns`）。
 - **长列表虚拟化**：在 `ListBox`/`ListView` **元素上显式**声明 `VirtualizingStackPanel.IsVirtualizing="True"` + `VirtualizingStackPanel.VirtualizationMode="Recycling"` + `ScrollViewer.CanContentScroll="True"`。
 - ⚠️ **禁止**用隐式样式 + `BasedOn="{StaticResource {x:Type ListView}}"` 批量设置：本应用里该键**解析不到主题样式**，会在**创建列表时**抛 `XamlParseException`（"无法找到名为 System.Windows.Controls.ListView 的资源"），表现为"点页面没反应、内容停在上一页"。harness 已断言禁止该写法。
-- **列头与行高统一：待做**（要统一 `GridViewColumnHeader`/`ListViewItem` 外观同样需要主题样式 `BasedOn`，得先找到安全做法：定义在窗口 Resources 里并实测，或写完整模板）。
+- **列头与行高统一（2026-09-24 完成，变更集 173，B3）**：安全做法＝在 `App.xaml` 定义**两个 keyed 样式**，由各表**显式挂载**（不用隐式样式、不用 `BasedOn="{StaticResource {x:Type ...}}"`）：
+  - `TableColumnHeaderStyle`（`TargetType=GridViewColumnHeader`）：`PanelBackgroundBrush` 底 + `LineBrush` 下边框、`MutedBrush` 字、**12px + SemiBold**（依据本文「可交互/需要强调的小字」条目）、`Height=34`、`Padding=10,0`；**不重写 Template**（保留系统模板的拖拽/宽度调整手柄）。
+  - `TableRowStyle`（`TargetType=ListViewItem`）：`TextBrush`、12px、`MinHeight=34`、`Padding=10,6`、`HorizontalContentAlignment=Stretch`，悬停 `HoverSurfaceBrush` / 选中 `SubtleSurfaceBrush`（Style 触发器，不写模板）。
+  - 挂载方式：`GridView ColumnHeaderContainerStyle="{StaticResource TableColumnHeaderStyle}"` + `ListView ItemContainerStyle="{StaticResource TableRowStyle}"`；动态生成的列（插件矩阵）在代码里 `view.ColumnHeaderContainerStyle = TryFindResource(...)`。已覆盖：对话页 3 张表 + 插件矩阵 + 任务页行；新表必须显式挂载（harness 有门禁）。
+  - 局部差异用 `BasedOn="{StaticResource TableRowStyle}"`（指向 **keyed** 样式是安全的——禁止的只是指向隐式类型键）。
+- **已知缺陷（待处理，不属本次变更）**：任务页行模板用 `*` 列，而列表开了横向滚动（宽度无界测量）时 `*` 会退化成“按内容定宽”，长实例名行会出现对象/标题/状态三列**重叠**（旧截图 `screenshots/146-.../05-tasks-1180x720.png` 就有，变更集 173 前后一致）。修法同变更集 143/159：把条目宽度绑定到列表宽度或换 `Auto`+固定列。
 允许横向滚动（`HorizontalScrollBarVisibility=Auto`）。列宽总和应 ≤ 默认窗口内容宽度，
 避免默认尺寸下就出现横向滚动条；窄窗口才出现属正常。
 

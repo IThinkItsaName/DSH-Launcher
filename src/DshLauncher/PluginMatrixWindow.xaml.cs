@@ -114,6 +114,12 @@ public partial class PluginMatrixWindow : UserControl
     private void RenderMatrix()
     {
         var view = new GridView();
+        // 变更集 173：矩阵列的列头也走共享 keyed 样式（列是动态生成的，只能在代码里挂）。
+        if (TryFindResource("TableColumnHeaderStyle") is Style headerStyle)
+        {
+            view.ColumnHeaderContainerStyle = headerStyle;
+        }
+
         view.Columns.Add(new GridViewColumn
         {
             Header = "插件",
@@ -141,6 +147,7 @@ public partial class PluginMatrixWindow : UserControl
         }
 
         MatrixList.View = view;
+        MatrixList.ItemContainerStyle = TryFindResource("TableRowStyle") as Style;
         MatrixList.ItemsSource = _matrix.Rows;
         EmptyText.Visibility = _matrix.Rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         StatusText.Text = _matrix.Columns.Count == 0
