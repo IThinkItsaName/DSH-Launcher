@@ -1237,20 +1237,12 @@ public partial class ExtensionWindow : UserControl
                 return;
             }
 
-            if (verification.Status == MarketplaceVerificationStatus.Incompatible)
+            if (verification.Status == MarketplaceVerificationStatus.Incompatible
+                && !await ConfirmIncompatiblePluginAsync(verification, item.IsInstalled ? "更新" : "安装"))
             {
-                var proceed = AppDialog.Show(
-                    Window.GetWindow(this),
-                    $"该插件与当前实例的 DSh 运行时不兼容：\n\n{verification.Message}\n\n继续{(item.IsInstalled ? "更新" : "安装")}后实例可能无法启动（可用安全模式或「逐插件定位」恢复）。仍要继续吗？",
-                    "插件依赖不兼容",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning) == MessageBoxResult.Yes;
-                if (!proceed)
-                {
-                    MarketplaceStatusText.Text = verification.Message;
-                    progressWindow.Fail(verification.Message);
-                    return;
-                }
+                MarketplaceStatusText.Text = verification.Message;
+                progressWindow.Fail(verification.Message);
+                return;
             }
 
             progressWindow.SetIndeterminate("Plugin 校验通过，正在保存当前配置…");
@@ -1815,18 +1807,10 @@ public partial class ExtensionWindow : UserControl
                         throw new InvalidOperationException(verdict.Message);
                     }
                 }
-                else if (verdict.Status == MarketplaceVerificationStatus.Incompatible)
+                else if (verdict.Status == MarketplaceVerificationStatus.Incompatible
+                    && !await ConfirmIncompatiblePluginAsync(verdict, "安装"))
                 {
-                    var proceed = AppDialog.Show(
-                        Window.GetWindow(this),
-                        $"该插件与当前实例的 DSh 运行时不兼容：\n\n{verdict.Message}\n\n安装后实例可能无法启动（可用安全模式或「逐插件定位」恢复）。仍要继续吗？",
-                        "插件依赖不兼容",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning) == MessageBoxResult.Yes;
-                    if (!proceed)
-                    {
-                        throw new InvalidOperationException(verdict.Message);
-                    }
+                    throw new InvalidOperationException(verdict.Message);
                 }
                 else if (verdict.Status == MarketplaceVerificationStatus.Unverified
                     && !string.IsNullOrWhiteSpace(verdict.Message))
@@ -1989,6 +1973,107 @@ public partial class ExtensionWindow : UserControl
         catch (Exception ex) { ShowError(ex); }
     }
 
+    /// <summary>
+    /// 该 verdict 指向的插件**精确版本**是否已在 profile 的 <c>compatibility.json</c> 里放行
+    /// （变更集 180）。读不出 / 实例版本未知时返回 false（保守：仍当不兼容处理）。
+    /// </summary>
+    private bool IsVerdictExempted(MarketplaceVerificationResult verdict)
+    {
+        var (key, runtimeVersion) = ExemptionIdentities(verdict);
+        return key is not null && runtimeVersion is not null
+            && ReadExemptions().IsExempted(key, runtimeVersion);
+    }
+
+    /// <summary>读当前实例当前 profile 的放行记录（只读；文件坏了也只给警告，不抛）。</summary>
+    private PluginVersionExemptions ReadExemptions() =>
+        PluginVersionExemptionService.Read(
+            _instance.DshHome,
+            DshProfileService.ResolveActiveName(_instance, _versionSettingsService));
+
+    /// <summary>把 verdict 换算成放行记录需要的两个身份：<c>包名@版本</c> 与实例的 DSH 版本。</summary>
+    private (string? Key, string? RuntimeVersion) ExemptionIdentities(MarketplaceVerificationResult verdict)
+    {
+        if (string.IsNullOrWhiteSpace(verdict.PackageName) || string.IsNullOrWhiteSpace(verdict.Version))
+        {
+            return (null, null);
+        }
+
+        var runtime = string.IsNullOrWhiteSpace(_instance.DetectedVersion) ? null : _instance.DetectedVersion.Trim();
+        return ($"{verdict.PackageName.Trim()}@{verdict.Version.Trim()}", runtime);
+    }
+
+    /// <summary>
+    /// 插件与运行时「不兼容」时的统一处置（变更集 180，docs/UPSTREAM-INTEGRATION-PLAN.md §B）：
+    /// ① 先看 profile 的 <c>compatibility.json</c>：若这个**精确版本**已放行，只提醒一句并放行
+    /// （上游启动时不会再拒绝它）；② 否则给出原来的风险确认；③ 用户不继续时，再问一次“要不要为这个精确版本
+    /// 写一条放行记录”，写成等价于 <c>dsh plugin allow-version … --accept-risk</c> 的记录。
+    /// 返回 true = 继续本次安装/更新。
+    /// </summary>
+    private async Task<bool> ConfirmIncompatiblePluginAsync(MarketplaceVerificationResult verdict, string actionText)
+    {
+        var (key, runtimeVersion) = ExemptionIdentities(verdict);
+        if (key is not null && IsVerdictExempted(verdict))
+        {
+            return AppDialog.Show(
+                Window.GetWindow(this),
+                $"“{verdict.PackageName}”与当前 DSh 运行时不一致，但已按精确版本放行：\n\n{key} → DSH {runtimeVersion}\n\n"
+                    + "dsh 启动时不会再因此禁用该插件。仍要" + actionText + "吗？",
+                "插件依赖不兼容（已放行）",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) == MessageBoxResult.Yes;
+        }
+
+        var proceed = AppDialog.Show(
+            Window.GetWindow(this),
+            $"该插件与当前实例的 DSh 运行时不兼容：\n\n{verdict.Message}\n\n继续{actionText}后实例可能无法启动（可用安全模式或「逐插件定位」恢复）。仍要继续吗？",
+            "插件依赖不兼容",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        if (proceed)
+        {
+            return true;
+        }
+
+        if (key is null || runtimeVersion is null)
+        {
+            return false;
+        }
+
+        var profileName = DshProfileService.ResolveActiveName(_instance, _versionSettingsService);
+        var grant = AppDialog.Show(
+            Window.GetWindow(this),
+            Services.DialogText.ForMessageBox(
+                "要不要为这个精确版本写一条放行记录？\n\n"
+                + "它会等价于你自己执行：\n"
+                + $"dsh plugin --profile {profileName} allow-version {key} --dsh-version {runtimeVersion} --accept-risk\n\n"
+                + "风险：放行只是让 dsh 启动时不再因兼容性禁用它，插件本身仍可能让实例崩溃或损坏数据；"
+                + "放行**只对这一个包的这个精确版本**与**这一个 DSH 版本**生效（换了运行版本要重新放行）。\n\n要现在放行吗？"),
+            "放行精确版本",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        if (!grant)
+        {
+            return false;
+        }
+
+        var result = await _service.AllowPluginVersionAsync(
+            _instance,
+            key,
+            runtimeVersion,
+            _nodeRuntime(),
+            CancellationToken.None);
+        AppDialog.Show(
+            Window.GetWindow(this),
+            Services.DialogText.ForMessageBox(
+                result.Ok
+                    ? $"{result.Message}\n\n现在可以继续{actionText}。"
+                    : $"{result.Message}\n\n{result.Output}".TrimEnd()),
+            result.Ok ? "已放行精确版本" : "放行失败",
+            MessageBoxButton.OK,
+            result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        return result.Ok;
+    }
+
     private async void Update_Click(object sender, RoutedEventArgs e)
     {
         if (ExtensionList.SelectedItem is not ExtensionEntry entry || entry.Kind != ExtensionKind.Plugin || !entry.Managed) return;
@@ -1999,12 +2084,7 @@ public partial class ExtensionWindow : UserControl
             {
                 var verdict = await _marketplaceService.CheckPluginCompatibilityAsync(entry.Name, _instance);
                 if (verdict.Status == MarketplaceVerificationStatus.Incompatible
-                    && AppDialog.Show(
-                        Window.GetWindow(this),
-                        $"“{entry.Name}”的最新版本与当前实例的 DSh 运行时不兼容：\n\n{verdict.Message}\n\n更新后实例可能无法启动。仍要继续吗？",
-                        "插件依赖不兼容",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    && !await ConfirmIncompatiblePluginAsync(verdict, "更新"))
                 {
                     StatusText.Text = "已取消更新：插件依赖不兼容。";
                     return;
@@ -2179,7 +2259,8 @@ public partial class ExtensionWindow : UserControl
                 foreach (var name in pending)
                 {
                     var verdict = await _marketplaceService.CheckPluginCompatibilityAsync(name, _instance);
-                    if (verdict.Status == MarketplaceVerificationStatus.Incompatible)
+                    // 已按精确版本放行的插件不必跳过（上游启动时不会再拒绝它）。
+                    if (verdict.Status == MarketplaceVerificationStatus.Incompatible && !IsVerdictExempted(verdict))
                     {
                         skipped.Add(name);
                     }

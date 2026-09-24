@@ -47,6 +47,18 @@ public static class CrashCauseClassifier
         "failed to apply loader entry"
     };
 
+    /// <summary>
+    /// 插件与运行时的**兼容性预检**拒绝（变更集 180，上游 0.1.7-rc.1 起）。正常时只写 stderr 并**禁用该行**、
+    /// 不一定是崩溃；但用户看到的往往是“插件莫名不见了 / 实例起不来”，所以归因必须能识别，并指向放行通道。
+    /// </summary>
+    private static readonly string[] PluginVersionSignatures =
+    {
+        "disabling profile plugin",
+        "is incompatible with dsh",
+        "incompatible-version",
+        "must be repaired before exemptions change"
+    };
+
     private static readonly string[] OutOfMemorySignatures =
     {
         "javascript heap out of memory",
@@ -87,6 +99,8 @@ public static class CrashCauseClassifier
         MatchPortSignature,
         MatchPortOccupied,
         MatchModuleResolution,
+        // 兼容性拒绝比通用“插件树加载失败”更具体，必须排在它前面（变更集 180）。
+        MatchPluginVersionSignature,
         MatchPluginRuntimeSignature,
         MatchPluginRuntimePath,
         MatchOutOfMemory,
@@ -235,6 +249,27 @@ public static class CrashCauseClassifier
             Describe(moduleHit),
             "在「实例设置 → 运行状况 → 插件排查」里用「定位肇事插件」找出坏插件，再一键禁用。",
             "bisect-plugins");
+    }
+
+    /// <summary>
+    /// 插件与运行时的兼容性预检拒绝（变更集 180）。上游 0.1.7-rc.1 起，插件声明的 <c>@deepseek-ai/dsh*</c>
+    /// peerDependencies 与运行时不匹配时，启动期会 <c>dsh: disabling profile plugin &lt;id&gt;: …</c> 并**禁用该行**——
+    /// 这属于上游设计内的拒绝（不一定是崩溃），但用户看到的是“插件莫名不见了 / 实例起不来”，因此单独归因。
+    /// </summary>
+    private static CrashCause? MatchPluginVersionSignature(RuleContext context)
+    {
+        if (FindFirst(context.Lines, PluginVersionSignatures) is not { } hit)
+        {
+            return null;
+        }
+
+        return new CrashCause(
+            CrashCauseKind.PluginVersionIncompatible,
+            CrashConfidence.High,
+            "插件与 DSh 运行版本不兼容（已被兼容性预检拒绝）",
+            Describe(hit),
+            "到「插件」页把这个**精确版本**放行（等价于 dsh plugin allow-version <包名@版本> --dsh-version <版本> --accept-risk），或换用与当前运行版本兼容的插件版本；放行只对那一个包与那一个 DSH 版本生效，换运行版本后需重新放行。",
+            null);
     }
 
     private static CrashCause? MatchPluginRuntimeSignature(RuleContext context)

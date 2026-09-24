@@ -2530,6 +2530,129 @@ Check("crash/单一命中时没有次因",
     CrashCauseClassifier.ClassifyAll(CrashProbe(134)).Secondary.Count == 0);
 
 // ===========================================================================
+// 17c. 插件精确版本豁免 + 兼容性归因（变更集 180，docs/UPSTREAM-INTEGRATION-PLAN.md §B）
+// ---------------------------------------------------------------------------
+// 语义严格镜像上游 packages/boot/app-boot/src/profile-compatibility.ts：
+//   * 键 = 精确「包名@版本」（小写包名 + 规范 SemVer），值 = 精确 DSH 版本列表；
+//   * 坏记录只警告并忽略，且此时不可重写（改写会丢内容）；
+//   * 文件不存在 = 没有任何放行、可安全写入；写入一律走上游 CLI（本服务只读）。
+// ===========================================================================
+{
+    // ① 精确版本判定（对照上游 isExactPluginVersion：semver.parse 后拼回必须等于原串）
+    var acceptedVersions = new[] { "1.2.3", "0.1.7-rc.2", "1.0.0+build.1", "0.0.1-alpha.0", "1.2.3-rc.1+b.2" };
+    var rejectedVersions = new[]
+    {
+        "v1.2.3", "=1.2.3", "^1.2.3", "~1.2.3", "1.2", "1", "1.2.3.4",
+        "01.2.3", "1.02.3", "1.2.03", "1.2.3-01", " 1.2.3", "1.2.3 ", string.Empty, "*", "latest", ">=1.2.3"
+    };
+    Check(
+        "plugin-exemption/精确版本判定与上游一致（拒 v 前缀/区间/前导零/空白）",
+        acceptedVersions.All(PluginVersionExemptionService.IsExactVersion)
+        && rejectedVersions.All(value => !PluginVersionExemptionService.IsExactVersion(value)),
+        $"accepted={acceptedVersions.Count(PluginVersionExemptionService.IsExactVersion)}"
+            + $" rejected={rejectedVersions.Count(value => !PluginVersionExemptionService.IsExactVersion(value))}");
+
+    Check(
+        "plugin-exemption/键必须是「包名@精确版本」（按最后一个 @ 切分）",
+        PluginVersionExemptionService.IsPackageVersionKey("@deepseek-ai/dsh-x@1.0.0")
+        && PluginVersionExemptionService.IsPackageVersionKey("plain-plugin@0.1.7-rc.2")
+        && !PluginVersionExemptionService.IsPackageVersionKey("@deepseek-ai/dsh-x")
+        && !PluginVersionExemptionService.IsPackageVersionKey("@Scope/Pkg@1.0.0")
+        && !PluginVersionExemptionService.IsPackageVersionKey("@deepseek-ai/dsh-x@^1.0.0"));
+
+    // ② 读文件：缺失 / 正常 / 坏记录 / 坏 JSON
+    var exemptHome = Path.Combine(scratch, "exempt-home");
+    Directory.CreateDirectory(exemptHome);
+    var missingExemptions = PluginVersionExemptionService.Read(exemptHome, "web");
+    Check(
+        "plugin-exemption/文件不存在＝没有放行且可安全写入",
+        missingExemptions is { FileExists: false, Rewritable: true }
+        && missingExemptions.Entries.Count == 0
+        && missingExemptions.Warnings.Count == 0
+        && !missingExemptions.IsExempted("@a/b@1.0.0", "0.1.7-rc.2"));
+
+    var exemptProfileDir = Path.Combine(exemptHome, "profiles", "web");
+    Directory.CreateDirectory(exemptProfileDir);
+    var exemptFile = Path.Combine(exemptProfileDir, "compatibility.json");
+    File.WriteAllText(
+        exemptFile,
+        """
+        {
+          "@deepseek-ai/dsh-computer-user@1.0.0": ["0.1.7-rc.2", "0.1.7-rc.1"],
+          "plain@0.1.5": ["0.1.7-rc.2"]
+        }
+        """,
+        Encoding.UTF8);
+    var goodExemptions = PluginVersionExemptionService.Read(exemptHome, "web");
+    Check(
+        "plugin-exemption/正常文件：记录可读，且只对本条登记的那个插件版本 + 那个 DSH 版本命中",
+        goodExemptions is { FileExists: true, Rewritable: true, Warnings.Count: 0 }
+        && goodExemptions.Entries.Count == 2
+        && goodExemptions.IsExempted("@deepseek-ai/dsh-computer-user@1.0.0", "0.1.7-rc.2")
+        && goodExemptions.IsExempted("@deepseek-ai/dsh-computer-user@1.0.0", "0.1.7-rc.1")
+        && !goodExemptions.IsExempted("@deepseek-ai/dsh-computer-user@1.0.0", "0.1.7-rc.3")
+        && !goodExemptions.IsExempted("@deepseek-ai/dsh-computer-user@1.0.1", "0.1.7-rc.2")
+        && goodExemptions.VersionsFor("@deepseek-ai/dsh-computer-user").Count == 2,
+        PluginVersionExemptionService.Describe(goodExemptions));
+
+    File.WriteAllText(
+        exemptFile,
+        """
+        {
+          "@deepseek-ai/dsh-x@^1.0.0": ["0.1.7-rc.2"],
+          "@deepseek-ai/dsh-y@1.0.0": ["^0.1.7"],
+          "@deepseek-ai/dsh-z@1.0.0": ["0.1.7-rc.2"],
+          "dsh-w": ["0.1.7-rc.2"]
+        }
+        """,
+        Encoding.UTF8);
+    var mixedExemptions = PluginVersionExemptionService.Read(exemptHome, "web");
+    Check(
+        "plugin-exemption/坏记录只警告并忽略，且标记为不可重写（同上游）",
+        mixedExemptions.Entries.Count == 1
+        && mixedExemptions.Entries.ContainsKey("@deepseek-ai/dsh-z@1.0.0")
+        && mixedExemptions.Warnings.Count == 3
+        && !mixedExemptions.Rewritable
+        && mixedExemptions.IsExempted("@deepseek-ai/dsh-z@1.0.0", "0.1.7-rc.2"),
+        $"entries={mixedExemptions.Entries.Count} warnings={mixedExemptions.Warnings.Count}");
+
+    File.WriteAllText(exemptFile, "{ not json", Encoding.UTF8);
+    var brokenExemptions = PluginVersionExemptionService.Read(exemptHome, "web");
+    Check(
+        "plugin-exemption/坏 JSON：不抛异常、按没有放行处理且不可重写",
+        brokenExemptions.Entries.Count == 0 && brokenExemptions.Warnings.Count == 1
+        && !brokenExemptions.Rewritable && brokenExemptions.FileExists);
+
+    // ③ 从上游报错里解析出“它真正要求的 DSH 版本”（实例登记滞后时自动重试一次）
+    Check(
+        "plugin-exemption/能从上游报错解析出真实 DSH 版本（用于重试）",
+        PluginVersionExemptionService.TryReadRequiredDshVersion(
+            "dsh: Error: Cannot approve DSH 0.1.7-rc.1: this application runs DSH 0.1.7-rc.2. Use --dsh-version 0.1.7-rc.2.") == "0.1.7-rc.2"
+        && PluginVersionExemptionService.TryReadRequiredDshVersion("dsh: allowed x@1.0.0 for DSH 0.1.7-rc.2") is null);
+
+    // ④ 归因：插件被兼容性预检拒绝（上游 0.1.7-rc.1 起）——这是“设计内的拒绝”，不是崩溃
+    var compatCause = CrashCauseClassifier.Classify(CrashProbe(
+        1,
+        "dsh: disabling profile plugin row \"dsh-x\": Plugin dsh-x@1.0.0 is incompatible with dsh 0.1.7-rc.2: "
+            + "peerDependencies {\"@deepseek-ai/dsh-settings\":\"^0.1.5\"}."));
+    Check(
+        "crash/插件被兼容性预检拒绝 → 单独归因并指向放行通道",
+        compatCause is { Kind: CrashCauseKind.PluginVersionIncompatible, Confidence: CrashConfidence.High }
+        && compatCause.Advice.Contains("放行", StringComparison.Ordinal),
+        compatCause.Kind + " / " + compatCause.Label);
+
+    Check(
+        "crash/不可重写的豁免文件与管理接口拒绝归到同一类，且通用插件故障仍是 PluginRuntime",
+        CrashCauseClassifier.Classify(CrashProbe(
+            1, "dsh: Error: compatibility.json must be repaired before exemptions change:")).Kind
+            == CrashCauseKind.PluginVersionIncompatible
+        && CrashCauseClassifier.Classify(CrashProbe(1, "ManagementFailure: incompatible-version")).Kind
+            == CrashCauseKind.PluginVersionIncompatible
+        && CrashCauseClassifier.Classify(CrashProbe(1, "Error: plugin tree failed to load")).Kind
+            == CrashCauseKind.PluginRuntime);
+}
+
+// ===========================================================================
 // 18. 自动注册的“安装目录级排除”（work-log/159 幽灵实例）
 // ===========================================================================
 // 场景复刻：配置的安装目录（run_time）里有一份载荷 node_modules\@deepseek-ai\dsh。

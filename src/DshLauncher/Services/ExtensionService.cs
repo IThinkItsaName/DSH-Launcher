@@ -988,6 +988,135 @@ public sealed partial class ExtensionService
         string.Equals(value, packageName, StringComparison.OrdinalIgnoreCase)
         || value?.StartsWith(packageName + "@", StringComparison.OrdinalIgnoreCase) == true;
 
+    /// <summary>
+    /// 解析「用哪个 dsh」执行 profile 级包操作：Installed 用实例的运行描述，Source 用已构建的 CLI 入口。
+    /// （从 <see cref="CreatePluginStartInfo"/> 提取，供豁免命令共用。）
+    /// </summary>
+    private DshRuntimeLaunchSpec ResolvePluginLaunchSpec(ManagerInstance instance, NodeRuntimeInfo? nodeRuntime)
+    {
+        if (instance.Kind != InstanceKind.Source)
+        {
+            return DshRuntimeCommandFactory.Resolve(instance)
+                ?? throw new InvalidOperationException("实例没有 DSh 启动描述。");
+        }
+
+        var project = _sourceInspector.Inspect(instance.RootPath);
+        var entrypoint = project.BuiltCliEntrypoint
+            ?? SourceProjectInspector.TryFindBuiltCliEntrypoint(instance.RootPath)
+            ?? throw new InvalidOperationException("Source 尚未完成构建，无法管理 Plugin。");
+        var nodeEngine = SourceProjectInspector.TryReadNodeEngine(instance.RootPath);
+        if (nodeRuntime is null || nodeRuntime.GetCompatibility(nodeEngine) != NodeRuntimeCompatibility.Compatible
+            || string.IsNullOrWhiteSpace(nodeRuntime.ExecutablePath))
+        {
+            throw new InvalidOperationException($"Source Plugin 管理需要兼容的 Node.js；当前状态为 {nodeRuntime?.GetCompatibility(nodeEngine).ToString() ?? "Missing"}，要求：{nodeEngine ?? "未声明"}。");
+        }
+
+        return new DshRuntimeLaunchSpec(
+            DshRuntimeLaunchMode.NodeScript,
+            nodeRuntime.ExecutablePath,
+            entrypoint,
+            NodeExecutablePath: nodeRuntime.ExecutablePath);
+    }
+
+    /// <summary>
+    /// 写一条**精确版本豁免**（等价于 <c>dsh plugin --profile &lt;p&gt; allow-version &lt;pkg@ver&gt; --dsh-version &lt;v&gt; --accept-risk</c>）。
+    /// <para>
+    /// 为什么走上游 CLI 而不是自己写 <c>compatibility.json</c>：精确格式校验、当前 DSH 版本校验、文件锁与原子写、
+    /// 以及“文件不可重写时就拒绝”这些语义都在上游的 <c>setProfileVersionExemption</c> 里，复刻只会带来漂移（work-log/204）。
+    /// 本方法不装包、不改 package 清单 ⇒ **不要求实例停止**；新放行在**下次启动**生效（上游不会热重载已加载的插件）。
+    /// 实例登记的版本可能滞后（例如刚换过运行版本）⇒ 上游报 <c>Use --dsh-version X</c> 时用 X 自动重试一次。
+    /// </para>
+    /// </summary>
+    public async Task<PluginVersionExemptionResult> AllowPluginVersionAsync(
+        ManagerInstance instance,
+        string packageVersion,
+        string runtimeVersion,
+        NodeRuntimeInfo? nodeRuntime,
+        CancellationToken cancellationToken = default)
+    {
+        var first = await RunAllowVersionAsync(instance, packageVersion, runtimeVersion, nodeRuntime, cancellationToken);
+        if (first.Ok)
+        {
+            return first;
+        }
+
+        if (PluginVersionExemptionService.TryReadRequiredDshVersion(first.Output) is not { } required
+            || string.Equals(required, runtimeVersion, StringComparison.Ordinal))
+        {
+            return first;
+        }
+
+        var retry = await RunAllowVersionAsync(instance, packageVersion, required, nodeRuntime, cancellationToken);
+        return retry.Ok
+            ? retry with { Message = $"已按上游实际运行的 DSH {required} 放行（实例登记的版本是 {runtimeVersion}）。" }
+            : retry;
+    }
+
+    private async Task<PluginVersionExemptionResult> RunAllowVersionAsync(
+        ManagerInstance instance,
+        string packageVersion,
+        string runtimeVersion,
+        NodeRuntimeInfo? nodeRuntime,
+        CancellationToken cancellationToken)
+    {
+        var spec = ResolvePluginLaunchSpec(instance, nodeRuntime);
+        // 参数顺序与上游 versionCommand 的解析一致；绝不加 --reporter / 安装模式那类 pnpm 选项
+        // （上游对未知参数是直接报 unexpected argument）。
+        var arguments = new List<string>
+        {
+            "plugin",
+            "--profile", _activeProfile(instance),
+            "allow-version", packageVersion,
+            "--dsh-version", runtimeVersion,
+            "--accept-risk"
+        };
+        var startInfo = DshRuntimeCommandFactory.Create(
+            spec,
+            arguments,
+            instance.RootPath,
+            instance.DshHome,
+            Path.Combine(instance.DshHome, ".agents"),
+            nodeRuntime?.ExecutablePath);
+        GitMirrorEnvironment.ApplyNoPrompt(startInfo);
+
+        var output = await RunProcessAsync(startInfo, cancellationToken, lineObserver: null);
+        var combined = CombinePluginOutput(output).Trim();
+        if (output.ExitCode == 0)
+        {
+            LauncherLog.Info(
+                "已写入插件精确版本豁免。",
+                ErrorCodes.E2020,
+                new { package = packageVersion, dshVersion = runtimeVersion, profile = _activeProfile(instance), output = combined });
+            return new PluginVersionExemptionResult(
+                true,
+                $"已放行 {packageVersion}（仅对 DSH {runtimeVersion} 生效，下次启动生效）。",
+                combined);
+        }
+
+        return new PluginVersionExemptionResult(false, DescribeAllowVersionFailure(combined), combined);
+    }
+
+    /// <summary>把上游的英文报错翻成可操作的中文（保留原文在 Detail 里，便于排障与粘贴）。</summary>
+    private static string DescribeAllowVersionFailure(string output)
+    {
+        if (output.Contains("must be repaired before exemptions change", StringComparison.OrdinalIgnoreCase))
+        {
+            return "compatibility.json 里有无法识别的记录，上游拒绝改写它；请先手工修好该文件再试。";
+        }
+
+        if (output.Contains("Incompatible plugins may cause crashes or data loss", StringComparison.OrdinalIgnoreCase))
+        {
+            return "上游要求显式确认风险（--accept-risk）后才允许放行。";
+        }
+
+        if (output.Contains("exact npm package-name@version", StringComparison.OrdinalIgnoreCase))
+        {
+            return "放行只接受精确的「包名@版本」（不接受区间 / v 前缀 / 模糊写法）。";
+        }
+
+        return "上游拒绝了这次放行（详见下方输出）。";
+    }
+
     private ProcessStartInfo CreatePluginStartInfo(
         ManagerInstance instance,
         string action,
@@ -996,31 +1125,7 @@ public sealed partial class ExtensionService
         string? allowBuildPackageName,
         PluginInstallMode installMode)
     {
-        DshRuntimeLaunchSpec spec;
-        if (instance.Kind == InstanceKind.Source)
-        {
-            var project = _sourceInspector.Inspect(instance.RootPath);
-            var entrypoint = project.BuiltCliEntrypoint
-                ?? SourceProjectInspector.TryFindBuiltCliEntrypoint(instance.RootPath)
-                ?? throw new InvalidOperationException("Source 尚未完成构建，无法管理 Plugin。");
-            var nodeEngine = SourceProjectInspector.TryReadNodeEngine(instance.RootPath);
-            if (nodeRuntime is null || nodeRuntime.GetCompatibility(nodeEngine) != NodeRuntimeCompatibility.Compatible
-                || string.IsNullOrWhiteSpace(nodeRuntime.ExecutablePath))
-            {
-                throw new InvalidOperationException($"Source Plugin 管理需要兼容的 Node.js；当前状态为 {nodeRuntime?.GetCompatibility(nodeEngine).ToString() ?? "Missing"}，要求：{nodeEngine ?? "未声明"}。");
-            }
-
-            spec = new DshRuntimeLaunchSpec(
-                DshRuntimeLaunchMode.NodeScript,
-                nodeRuntime.ExecutablePath,
-                entrypoint,
-                NodeExecutablePath: nodeRuntime.ExecutablePath);
-        }
-        else
-        {
-            spec = DshRuntimeCommandFactory.Resolve(instance)
-                ?? throw new InvalidOperationException("实例没有 DSh 启动描述。");
-        }
+        var spec = ResolvePluginLaunchSpec(instance, nodeRuntime);
 
         var arguments = new List<string> { "plugin", "--profile", _activeProfile(instance), action, packageSpec };
         AddPnpmOptions(arguments, action, allowBuildPackageName, installMode);

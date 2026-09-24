@@ -43,7 +43,14 @@ public enum CrashCauseKind
     ForceKilled,
 
     /// <summary>本机级崩溃或被系统终止（变更集 126；NTSTATUS 族负值退出码，只报原始码）。</summary>
-    NativeCrash
+    NativeCrash,
+
+    /// <summary>
+    /// 插件声明的 DSh 核心依赖与运行时不符，被上游兼容性预检拒绝（变更集 180：
+    /// <c>disabling profile plugin …: Plugin pkg@ver is incompatible with dsh X</c> /
+    /// <c>compatibility.json must be repaired before exemptions change</c> / <c>incompatible-version</c>）。
+    /// </summary>
+    PluginVersionIncompatible
 }
 
 /// <summary>判定置信度：低置信不向用户下结论。</summary>

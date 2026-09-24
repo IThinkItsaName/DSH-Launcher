@@ -14,7 +14,7 @@
 > - 哨兵实现在 `_verify-p0/Program.cs` 的「契约哨兵」段，命名前缀 `contract:`。
 > - 已安装运行时的定位**不再写死版本号**（2026-09-15，work-log/156）：探针遍历 `versions/` 按版本降序取包根，
 >   并先跑 `contract: 已安装运行时包根可解析（C1/C2/C6 探针前置）`；该前置 FAIL 时先修路径/重装，不要当作契约破坏。
-> - 最近核对：上游 `477b4f42`（2026-09-24，`dsh-v0.1.7-rc.2`；本区间新增 **C20**）、安装运行时 `0.1.7-rc.1`（2026-09-24 核对；上一次记录 0.1.5-rc.2 已过时）。
+> - 最近核对：上游 `477b4f42`（2026-09-24，`dsh-v0.1.7-rc.2`；本区间新增 **C20** 与 **C21**）、安装运行时 `0.1.7-rc.1`（2026-09-24 核对；上一次记录 0.1.5-rc.2 已过时）。
 > - 编号 **C18** 为历史保留号（对应能力已并入 C13/C17），表中不单列。
 
 ## 一、契约表
@@ -43,6 +43,9 @@
 | **C19** | 社区探针审计文件格式：`<DSH_HOME>/audit/<DSH_AUDIT_PROFILE\|session>.jsonl`，每行 `{t,sid,seq,type,actor,h[,flags,sev,key,raw]}`（`@marcog-h/dsh-audit` 0.1.5，MIT，第三方可选） | 探针源码 `lib/index.js`（`_repro/probe-audit/` 留有 tarball 备查） | `AuditProbeTimelineService`（#20 增量 3） | 字段改名 → 时间轴少字段或空态；**因我们只读白名单字段，最坏是显示变少，不会崩** | 无 harness 哨兵（第三方可选数据源、非我方依赖；解析容错 + 字段白名单 + 反证 F/G 覆盖） |
 
 | **C20** | 定时提醒存储：**`<DSH_HOME>/storages/schedule.json`**（`storage-json` 的 **single** 布局——schedule 域没声明 `layout: 'per-record'`，默认就是 single；形状 `{"unit":{"name":"schedule","version":1},"global":null,"tables":{"tasks":{"<id>":{sessionId,record:{kind,title,scheduledAt,…},status,…}}}}`，单条 `status` 缺省 ⇒ active）。**启动器只读、不写**；per-record 写法只作兼容 | 上游 `packages/schedule/schedule/src/storage.ts`（域/表/布局）+ `packages/storage/storage-json/src/index.ts`（按 `descriptor.layout === 'per-record'` 选单元）+ `single-unit.ts`（写 `<root>/<name>.json`）+ `packages/bundle/base/cordis.patch.yml`（`dshHomePath('storages')`）；`web` profile 自 0.1.7-rc.1 起默认挂载 Schedule | `ScheduleSnapshotService`（**变更集 176，布局口径 178 修正**）、`MainWindow.EvaluateIdleAutoStop` / `ConfirmStopWithPendingSchedules`、`ManagerInstance.ScheduleSummaryText` | **温和**：读不懂就降级为「未知」（不提示、不拦操作；绝不会让实例操作失败）。最坏=防呆漏报或卡片少一行；**176 曾猜成 per-record ⇒ 真实文件读不到任何提醒（已用真实文件核对并在 178 修正）** | `contract: 定时提醒仍是 single 布局（storages/schedule.json）+ 域版本 1（C20）`（源码级；额外断言启动器读的就是 `schedule.json`） |
+
+| **C21** | 插件**精确版本豁免**：文件 `<DSH_HOME>/profiles/<profile>/compatibility.json`，形状 `{ "包名@精确版本": ["精确 DSH 版本", …] }`；键必须是**小写包名 + 规范写法 SemVer**（拒 `v` 前缀/区间/前导零/空白），值是精确 DSH 版本列表；坏记录只警告并忽略、且此时文件**不可重写**；写入入口 `dsh plugin allow-version <pkg@ver> --dsh-version <exact> --accept-risk`（上游做精确校验/当前版本校验/文件锁/原子写/0600，并拒绝改写已有坏记录的文件）。插件 peerDependencies 不满足时，**启动期预检会禁用该行**（stderr: `dsh: disabling profile plugin <id>: …`）。**启动器只读，写入一律走上游 CLI** | 上游 `packages/boot/app-boot/src/profile-compatibility.ts`（文件名/校验/写入）、`plugin-compatibility.ts`（判定与文案）、`compatibility-preflight.ts`（启动拒绝）、`apps/cli/src/plugin.ts`（`allow-version`/`--accept-risk`） | `PluginVersionExemptionService`（**变更集 180**）、`ExtensionService.AllowPluginVersionAsync`（**变更集 180**）、`ExtensionWindow.ConfirmIncompatiblePluginAsync`、`CrashCauseClassifier`（`PluginVersionIncompatible`） | **温和但看得见**：读不出/看不懂 ⇒ 按“没有放行”处理并提示（不会崩）；上游改文件名或收紧入口时，放行按钮会失败但会附上上游原输出；最坏是“文案还不准”而非误操作 | `contract: 插件精确版本豁免仍是 compatibility.json + allow-version --accept-risk（C21）`（源码级，读本地上游克隆） |
+
 
 ## 二、降级方向（0.1.5 → 0.1.2）为什么是单向的
 

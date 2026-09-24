@@ -34,6 +34,7 @@ public static class ErrorCodes
     public const string E2003 = "E2003"; // 批量更新部分失败
     public const string E2004 = "E2004"; // 插件命令失败后自动重试/镜像恢复
     public const string E2005 = "E2005"; // 插件失败残留清理（回滚）
+    public const string E2020 = "E2020"; // 插件精确版本豁免（写 compatibility.json）
 
     // E3xxx 网络 / 代理
     public const string E3001 = "E3001"; // 代理配置无效
@@ -70,6 +71,7 @@ public static class ErrorCodes
         E2003 => "批量更新部分插件失败（其余插件已更新）。",
         E2004 => "插件命令失败后触发了自动重试或 GitHub 镜像恢复。",
         E2005 => "插件失败安装的残留被清理，或残留清理本身失败。",
+        E2020 => "插件精确版本豁免：按精确版本放行某个插件（写 profile 的 compatibility.json）。",
         E3001 => "代理配置无效（地址或端口不合法，已忽略）。",
         E3002 => "DeepSeek 余额查询失败（网络/凭据问题）。",
         E4001 => "浏览器守卫执行失败（未能枚举或结束浏览器进程）。",
