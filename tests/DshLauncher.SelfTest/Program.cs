@@ -896,8 +896,15 @@ Check("packarchive/配对校验：v5 配 v3 通过、配 v2 拒载",
     Check("安装/166: 工作目录 = 安装目录（普通安装以 cwd 为项目根）",
         string.Equals(Path.GetFullPath(startInfo.WorkingDirectory), Path.GetFullPath(installDir), StringComparison.OrdinalIgnoreCase),
         startInfo.WorkingDirectory);
+    // 变更集 177：这条断言原本写的是「环境里没有 NPM_CONFIG_PREFIX」，但 ProcessStartInfo.Environment
+    // **继承进程环境** ⇒ 只要跑测试的机器（例如 GitHub 的 windows-latest）带着这个变量就必失败，
+    // 与产品行为无关（本机不设它时从来是绿的，所以直到真正跑 CI 才暴露）。
+    // 真正要断言的是「产品没有**改动**它」——改用 --prefix 后不再需要这个全局模式的环境变量。
+    var ambientPrefix = Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX");
+    var startInfoHasPrefix = startInfo.Environment.TryGetValue("NPM_CONFIG_PREFIX", out var startInfoPrefix);
     Check("安装/166: 不再设 NPM_CONFIG_PREFIX（那是 global 模式的用法）",
-        !startInfo.Environment.ContainsKey("NPM_CONFIG_PREFIX"));
+        !startInfoHasPrefix || string.Equals(startInfoPrefix, ambientPrefix, StringComparison.Ordinal),
+        $"ambient={ambientPrefix ?? "(未设置)"} startInfo={startInfoPrefix ?? "(未设置)"}");
 
     // (2) 入口 shim：把 .bin 里的“上一级”目标改写成 node_modules 内，并落到安装目录根
     var binDir = Path.Combine(installDir, "node_modules", ".bin");
