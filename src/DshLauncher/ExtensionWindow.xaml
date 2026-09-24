@@ -35,7 +35,7 @@
     <Grid Margin="0">
         <Grid.ColumnDefinitions>
             <!-- 变更集 134：侧栏由固定 320 改为比例 + 上下限（窄窗口不再挤压右栏） -->
-            <ColumnDefinition Width="0.26*" MinWidth="260" MaxWidth="380" />
+            <ColumnDefinition Width="320" />
             <ColumnDefinition Width="18" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
