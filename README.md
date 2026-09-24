@@ -126,6 +126,7 @@ dsh-launcher-dev/
 | [docs/UI-UNIFICATION-TODO.md](docs/UI-UNIFICATION-TODO.md) | UI 统一待办（挂起中） |
 | [docs/FEATURE-INVENTORY.md](docs/FEATURE-INVENTORY.md) | **功能台账**：三级分类（12 域 / 85 L2 / 281 L3）+ 界面承载矩阵 + 完整性四口径判定 + 缺口清单 + 界面布局建议 |
 | [docs/WALLPAPER-PROPOSAL.md](docs/WALLPAPER-PROPOSAL.md) | 壁纸模式方案（B2c，未实施）：三种形态与取舍、待拍板问题、拆分步骤 |
+| [docs/UPSTREAM-CAPABILITY-REVIEW.md](docs/UPSTREAM-CAPABILITY-REVIEW.md) | 与上游 v1.2.4 的能力对照（评估）：双方独有能力、同能力不同实现、三条路线建议 |
 | [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) | 第三方组件与许可（Tabler Icons 等） |
 
 ## 实现方式说明
