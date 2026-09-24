@@ -202,16 +202,16 @@
                                 <TextBlock Text="启动" />
                             </StackPanel>
                         </Button>
-                        <Button AutomationProperties.Name="导航：扩展" x:Name="NavigationExtensions" Tag="扩展" Click="Navigation_Click" Style="{StaticResource TopNavButton}">
+                        <Button AutomationProperties.Name="导航：插件" x:Name="NavigationExtensions" Tag="扩展" Click="Navigation_Click" Style="{StaticResource TopNavButton}">
                             <StackPanel Orientation="Horizontal">
                                 <controls:UiIcon Kind="Extensions" Size="18" Margin="{StaticResource IconTextGap}" />
-                                <TextBlock Text="扩展" />
+                                <TextBlock Text="插件" />
                             </StackPanel>
                         </Button>
-                        <Button AutomationProperties.Name="导航：Agent" x:Name="NavigationAgent" Tag="Agent" Click="Navigation_Click" Style="{StaticResource TopNavButton}">
+                        <Button AutomationProperties.Name="导航：Skill" x:Name="NavigationAgent" Tag="Agent" Click="Navigation_Click" Style="{StaticResource TopNavButton}">
                             <StackPanel Orientation="Horizontal">
                                 <controls:UiIcon Kind="Agent" Size="18" Margin="{StaticResource IconTextGap}" />
-                                <TextBlock Text="Agent" />
+                                <TextBlock Text="Skill" />
                             </StackPanel>
                         </Button>
                         <Button AutomationProperties.Name="导航：对话" x:Name="NavigationConversations" Tag="对话" Click="Navigation_Click" Style="{StaticResource TopNavButton}">

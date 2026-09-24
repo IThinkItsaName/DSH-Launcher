@@ -2236,14 +2236,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SelectedInstance is not { } instance)
             {
-                PageTitle = section;
+                PageTitle = SectionDisplayName(section);
                 PageSubtitle = "请先在“启动”工作区注册并选择一个 DSh 实例";
                 ShowMainDashboard();
-                ShowNotice($"请先注册并选择一个 DSh 实例，再打开“{section}”。");
+                ShowNotice($"请先注册并选择一个 DSh 实例，再打开“{SectionDisplayName(section)}”。");
             }
             else
             {
-                PageTitle = section;
+                PageTitle = SectionDisplayName(section);
                 PageSubtitle = section switch
                 {
                     "扩展" => "管理当前实例的 Plugin 与 MCP",
@@ -2296,7 +2296,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            PageTitle = section;
+            PageTitle = SectionDisplayName(section);
             PageSubtitle = "DSH Launcher Core 设置与诊断";
             ShowEmbeddedPage(CreateSettingsPage());
         }
@@ -5792,6 +5792,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         TaskBadge.Visibility = running == 0 ? Visibility.Collapsed : Visibility.Visible;
         TaskBadgeText.Text = running > 9 ? "9+" : running.ToString();
     }
+
+    /// <summary>
+    /// 导航与页头的显示名（变更集 179，用户口径）：内部 section key 仍用 "扩展" / "Agent"，
+    /// 只有界面文案改成“插件” / "Skill"（术语表里 `Plugin`/`Skill` 管对象名，“插件”是导航文案的例外，已在 docs/UI-DESIGN.md 登记）。
+    /// </summary>
+    private static string SectionDisplayName(string section) => section switch
+    {
+        "扩展" => "插件",
+        "Agent" => "Skill",
+        _ => section
+    };
 
     private void SetNavigationSelection(string section)
     {

@@ -105,8 +105,8 @@ public partial class ExtensionWindow : UserControl
         };
         _useDshMarketHotReload = _versionSettingsService?.Read(instance).UseDshMarketHotReload ?? true;
         DshMarketHotReloadCheckBox.IsChecked = _useDshMarketHotReload;
-        MarketplaceCategoryList.Visibility = _agentOnly ? Visibility.Collapsed : Visibility.Visible;
-        SkillMarketCategoryList.Visibility = _agentOnly ? Visibility.Visible : Visibility.Collapsed;
+        MarketplaceCategoryBox.Visibility = _agentOnly ? Visibility.Collapsed : Visibility.Visible;
+        SkillMarketCategoryBox.Visibility = _agentOnly ? Visibility.Visible : Visibility.Collapsed;
         CurrentInstanceNameText.Text = instance.Name;
         CurrentInstanceMetaText.Text = string.Join(
             " · ",
@@ -178,7 +178,7 @@ public partial class ExtensionWindow : UserControl
         string? restoreCategoryKey = null)
     {
         var query = SkillMarketSearchBox.Text.Trim();
-        var category = (SkillMarketCategoryList.SelectedItem as ListBoxItem)?.Tag?.ToString() ?? string.Empty;
+        var category = (SkillMarketCategoryBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? string.Empty;
         // 变更集 123：Agent 页也支持「来源 / 排序」（与扩展页对齐）
         // 变更集 124：重建来源选项——配置源 ∪ 当前列表实际仓库（缓存路径下 RefreshSkillMarketAsync 不会跑，挂在它里面会导致下拉恒为空）
         RefreshSkillMarketSourceChoices(items);
@@ -257,7 +257,7 @@ public partial class ExtensionWindow : UserControl
     {
         // 防初始化期误触发：SelectedIndex="0" 会在 InitializeComponent 阶段就引发本事件，
         // 此时同页其它控件（搜索框/分类/列表）还没构造，直接渲染会 NRE（变更集 123 修）。
-        if (!IsLoaded || SkillMarketSearchBox is null || SkillMarketCategoryList is null || SkillMarketList is null)
+        if (!IsLoaded || SkillMarketSearchBox is null || SkillMarketCategoryBox is null || SkillMarketList is null)
         {
             return;
         }
@@ -349,7 +349,7 @@ public partial class ExtensionWindow : UserControl
         }
     }
 
-    private void SkillMarketCategoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void SkillMarketCategoryBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var nextCategoryKey = GetSelectedSkillCategoryKey();
         SaveScrollOffset(SkillMarketList, _skillMarketScrollOffsets, _activeSkillMarketCategoryKey);
@@ -645,7 +645,7 @@ public partial class ExtensionWindow : UserControl
     {
         if (_controlLoaded)
         {
-            if (ReferenceEquals(sender, MarketplaceCategoryList))
+            if (ReferenceEquals(sender, MarketplaceCategoryBox))
             {
                 var nextCategoryKey = GetSelectedCategoryKey();
                 SaveScrollOffset(MarketplaceList, _marketplaceScrollOffsets, _activeMarketplaceCategoryKey);
@@ -1041,10 +1041,10 @@ public partial class ExtensionWindow : UserControl
     }
 
     private string GetSelectedCategoryKey() =>
-        (MarketplaceCategoryList.SelectedItem as ListBoxItem)?.Tag as string ?? string.Empty;
+        (MarketplaceCategoryBox.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty;
 
     private string GetSelectedSkillCategoryKey() =>
-        (SkillMarketCategoryList.SelectedItem as ListBoxItem)?.Tag?.ToString() ?? string.Empty;
+        (SkillMarketCategoryBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? string.Empty;
 
     private static void SaveScrollOffset(
         WpfListBox list,
@@ -2294,30 +2294,12 @@ public partial class ExtensionWindow : UserControl
             MarketplaceSearchBox.Text = state.Search;
         }
 
-        SelectListBoxTag(MarketplaceCategoryList, state.CategoryKey);
+        SelectComboTag(MarketplaceCategoryBox, state.CategoryKey);
         SelectComboTag(MarketplaceSourceBox, state.SourceKey);
         SelectComboTag(MarketplaceSortBox, state.SortKey);
         foreach (var pair in state.ScrollOffsets)
         {
             _marketplaceScrollOffsets[pair.Key] = pair.Value;
-        }
-    }
-
-    private static void SelectListBoxTag(WpfListBox list, string? tag)
-    {
-        if (string.IsNullOrEmpty(tag))
-        {
-            return;
-        }
-
-        foreach (var item in list.Items)
-        {
-            if (item is ListBoxItem listBoxItem
-                && string.Equals(listBoxItem.Tag as string, tag, StringComparison.Ordinal))
-            {
-                list.SelectedItem = listBoxItem;
-                return;
-            }
         }
     }
 
