@@ -54,6 +54,7 @@
                     <RowDefinition Height="*" MinHeight="96" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel>
@@ -202,7 +203,7 @@
                                 </Border>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
-                    </ListBox>
+                        </ListBox>
                 </Border>
 
                 <Border Grid.Row="3"
@@ -249,8 +250,102 @@
                                    Margin="0,4,0,0" />
                     </StackPanel>
                 </Border>
+                <!-- 变更集 181：当前 profile 的精确版本豁免——常驻只读列表 + 逐个撤销（只在上游拒绝时才需要手工介入，见上游 profile-compatibility.ts） -->
+                <Border Grid.Row="4"
+                        x:Name="ExemptionPanel"
+                        Margin="0,8,0,0"
+                        Background="{StaticResource InfoBackgroundBrush}"
+                        CornerRadius="{StaticResource PanelCornerRadius}"
+                        Padding="10">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ExemptionHeaderText"
+                                       Text="已放行（精确版本豁免）"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    x:Name="ExemptionToggleButton"
+                                    AutomationProperties.Name="展开或收起放行记录"
+                                    Style="{StaticResource CompactToolbarButton}"
+                                    Content="展开"
+                                    Click="ExemptionToggle_Click" />
+                            <Button Grid.Column="2"
+                                    x:Name="ExemptionRefreshButton"
+                                    Margin="6,0,0,0"
+                                    Style="{StaticResource CompactToolbarButton}"
+                                    Content="刷新"
+                                    Click="ExemptionRefresh_Click" />
+                        </Grid>
+                        <!-- 默认收起（左栏纵向空间有限；计数常驻可见），展开才占空间 -->
+                        <!-- 变更集 181：放行记录用浮层展示——左栏纵向空间有限，浮层不参与布局（同 ComboBox 下拉的思路） -->
+                        <Popup x:Name="ExemptionPopup"
+                               PlacementTarget="{Binding ElementName=ExemptionPanel}"
+                               Placement="Top"
+                               VerticalOffset="-6"
+                               AllowsTransparency="True"
+                               StaysOpen="False">
+                            <Grid MinWidth="320" MaxWidth="520">
+                                <!-- 阴影单独一层：Effect 挂在含内容的元素上会把内部文字一起栅格化（UI-DESIGN 分层规则） -->
+                                <Border Background="{StaticResource CardBrush}"
+                                        BorderBrush="{StaticResource LineBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource PanelCornerRadius}"
+                                        Effect="{StaticResource CardShadow}" />
+                                <Border Background="{StaticResource CardBrush}"
+                                        BorderBrush="{StaticResource LineBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="{StaticResource PanelCornerRadius}"
+                                        Padding="10">
+                                <StackPanel>
+                                    <TextBlock x:Name="ExemptionEmptyText"
+                                               Text="当前 profile 没有放行记录。插件与运行版本不兼容时，可在安装/更新提示里放行它。"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap" />
+                                    <ListBox x:Name="ExemptionList"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             MaxHeight="200"
+                                             Margin="0,6,0,0"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             VirtualizingStackPanel.IsVirtualizing="True"
+                                             VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                             ScrollViewer.CanContentScroll="True">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Display}"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource TextBrush}"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding PackageVersion}" />
+                                                    <Button Grid.Column="1"
+                                                            Style="{StaticResource CompactToolbarDangerButton}"
+                                                            Content="撤销"
+                                                            Tag="{Binding}"
+                                                            Click="ExemptionRevoke_Click" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Popup>
+                    </StackPanel>
+                </Border>
 
-                <TextBlock Grid.Row="4"
+                <TextBlock Grid.Row="5"
                            x:Name="StatusText"
                            Foreground="{StaticResource BlueBrush}"
                            TextWrapping="Wrap"

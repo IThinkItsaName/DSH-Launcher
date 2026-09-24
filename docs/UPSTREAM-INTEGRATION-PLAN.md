@@ -64,7 +64,7 @@
 
 ### B. 插件版本豁免 + 启动失败归因（P1）
 
-> **状态：已在变更集 180 落地**（work-log/204）——B1 只读 `PluginVersionExemptionService`、B2 `ExtensionService.AllowPluginVersionAsync`（**写走上游 CLI**）+ 界面“已放行识别 / 一键放行”、B3 归因新增 `CrashCauseKind.PluginVersionIncompatible`。验证：构建 0/0、SelfTest **224/0**（+9）、harness **404/0/0**（+2 门禁 + 哨兵 **C21**）+ 真机端到端四项（含“实例登记版本滞后自动重试”与“坏文件被上游拒绝改写”）。
+> **状态：已在变更集 180 落地（181 补上界面收口）**（work-log/204、[205](../work-log/205-exemption-list-and-revoke.md)）——B1 只读 `PluginVersionExemptionService`、B2 `ExtensionService.AllowPluginVersionAsync`（**写走上游 CLI**）+ 界面“已放行识别 / 一键放行”、B3 归因新增 `CrashCauseKind.PluginVersionIncompatible`；**181**：插件页常驻「已放行：N 条」+ 浮层列表 + 逐条**撤销**（走上游 `revoke-version`）。验证：构建 0/0、SelfTest **226/0**、harness **404/0/0**（+2 门禁 + 哨兵 **C21**）+ 真机端到端（放行/滞后重试/区间被拒/坏文件拒绝改写/撤销幂等）+ 真机截图。
 
 **上游事实（已核）**
 

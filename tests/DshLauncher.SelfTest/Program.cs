@@ -2650,6 +2650,29 @@ Check("crash/单一命中时没有次因",
             == CrashCauseKind.PluginVersionIncompatible
         && CrashCauseClassifier.Classify(CrashProbe(1, "Error: plugin tree failed to load")).Kind
             == CrashCauseKind.PluginRuntime);
+
+    // ⑤ 界面行（变更集 181）与命令参数：列表里一条 = 一个包@版本 × 一个 DSH 版本（撤销就按这对精确版本操作）
+    var exemptionRows = PluginVersionExemptionService.ToRows(goodExemptions);
+    Check(
+        "plugin-exemption/界面行：一个包@版本 × 一个 DSH 版本一行，按包名升序",
+        exemptionRows.Count == 3
+        && exemptionRows[0].PackageVersion == "@deepseek-ai/dsh-computer-user@1.0.0"
+        && exemptionRows[0].PackageName == "@deepseek-ai/dsh-computer-user"
+        && exemptionRows[0].PluginVersion == "1.0.0"
+        && exemptionRows[0].Display == "@deepseek-ai/dsh-computer-user@1.0.0 → DSH 0.1.7-rc.2"
+        && exemptionRows[2].PackageVersion == "plain@0.1.5",
+        $"rows={exemptionRows.Count}");
+
+    var grantArguments = string.Join(" ", ExtensionService.BuildVersionExemptionArguments(
+        "web", "allow-version", "@a/b@1.0.0", "0.1.7-rc.2", acceptRisk: true));
+    var revokeArguments = string.Join(" ", ExtensionService.BuildVersionExemptionArguments(
+        "web", "revoke-version", "@a/b@1.0.0", "0.1.7-rc.2", acceptRisk: false));
+    Check(
+        "plugin-exemption/命令参数：放行带 --accept-risk、撤销不带，且都不带 pnpm 选项",
+        grantArguments == "plugin --profile web allow-version @a/b@1.0.0 --dsh-version 0.1.7-rc.2 --accept-risk"
+        && revokeArguments == "plugin --profile web revoke-version @a/b@1.0.0 --dsh-version 0.1.7-rc.2"
+        && !grantArguments.Contains("--reporter", StringComparison.Ordinal),
+        grantArguments + " || " + revokeArguments);
 }
 
 // ===========================================================================

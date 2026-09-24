@@ -138,6 +138,7 @@ public partial class ExtensionWindow : UserControl
             UpdateAllButton.Visibility = Visibility.Collapsed;
             AddMcpButton.Visibility = Visibility.Collapsed;
             DshMarketHotReloadCheckBox.Visibility = Visibility.Collapsed;
+            ExemptionPanel.Visibility = Visibility.Collapsed;
             EnableButton.Visibility = Visibility.Collapsed;
             DisableButton.Visibility = Visibility.Collapsed;
             UpdateButton.Visibility = Visibility.Collapsed;
@@ -148,6 +149,8 @@ public partial class ExtensionWindow : UserControl
             ImportSkillButton.Visibility = Visibility.Collapsed;
             ImportPresetButton.Visibility = Visibility.Collapsed;
         }
+
+        RefreshExemptions();
     }
 
     private void SetupSkillMarket()
@@ -2071,7 +2074,100 @@ public partial class ExtensionWindow : UserControl
             result.Ok ? "已放行精确版本" : "放行失败",
             MessageBoxButton.OK,
             result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        RefreshExemptions();
         return result.Ok;
+    }
+
+    /// <summary>
+    /// 刷新「已放行（精确版本豁免）」常驻列表（变更集 181）：读当前实例当前 profile 的 compatibility.json，
+    /// 摊平成"一条 = 一个包@版本 × 一个 DSH 版本"，每行可撤销。
+    /// 文件里有本读者拒绝的记录时，上游会拒绝任何改写 ⇒ 这里必须把“先手工修文件”讲出来。
+    /// </summary>
+    private void RefreshExemptions()
+    {
+        try
+        {
+            var exemptions = ReadExemptions();
+            var rows = PluginVersionExemptionService.ToRows(exemptions);
+            ExemptionList.ItemsSource = rows;
+            ExemptionHeaderText.Text = rows.Count == 0
+                ? "已放行（精确版本豁免）"
+                : $"已放行（精确版本豁免）：{rows.Count} 条";
+
+            if (!exemptions.Rewritable && exemptions.Warnings.Count > 0)
+            {
+                var head = string.Join("\n", exemptions.Warnings.Take(3));
+                ExemptionEmptyText.Text =
+                    $"compatibility.json 里有无法识别的记录（{exemptions.Warnings.Count} 条）：上游会拒绝任何放行/撤销，请先手工修好该文件。\n{head}";
+                ExemptionEmptyText.Visibility = Visibility.Visible;
+                // 上游会因此拒绝一切改写 ⇒ 让标题行就能看见，不必先展开浮层。
+                ExemptionHeaderText.Text += $"（文件有 {exemptions.Warnings.Count} 条无法识别的记录，需先手工修）";
+                return;
+            }
+
+            ExemptionEmptyText.Text = "当前 profile 没有放行记录。插件与运行版本不兼容时，可在安装/更新提示里放行它。";
+            ExemptionEmptyText.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            // 只读诊断信息不该把页面弄崩：列表留空并如实说明。
+            ExemptionList.ItemsSource = Array.Empty<PluginExemptionRow>();
+            ExemptionEmptyText.Text = $"读取放行记录失败：{ex.Message}";
+            ExemptionEmptyText.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void ExemptionRefresh_Click(object sender, RoutedEventArgs e) => RefreshExemptions();
+
+    /// <summary>打开/关闭放行记录浮层（左栏纵向空间有限，列表不参与布局）。</summary>
+    private void ExemptionToggle_Click(object sender, RoutedEventArgs e)
+    {
+        ExemptionPopup.IsOpen = !ExemptionPopup.IsOpen;
+        ExemptionToggleButton.Content = ExemptionPopup.IsOpen ? "收起" : "展开";
+    }
+
+    private async void ExemptionRevoke_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not PluginExemptionRow row)
+        {
+            return;
+        }
+
+        var confirmed = AppDialog.Show(
+            Window.GetWindow(this),
+            $"撤销这条放行记录？\n\n{row.Display}\n\n撤销后 dsh 下次启动会重新因兼容性禁用 {row.PackageName}（当前已加载的实例不受影响）。",
+            "撤销放行",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _service.RevokePluginVersionAsync(
+                _instance,
+                row.PackageVersion,
+                row.DshVersion,
+                _nodeRuntime(),
+                CancellationToken.None);
+            RefreshExemptions();
+            StatusText.Text = result.Ok ? result.Message : $"撤销失败：{result.Message}";
+            if (!result.Ok)
+            {
+                AppDialog.Show(
+                    Window.GetWindow(this),
+                    Services.DialogText.ForMessageBox($"{result.Message}\n\n{result.Output}"),
+                    "撤销放行失败",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
     }
 
     private async void Update_Click(object sender, RoutedEventArgs e)

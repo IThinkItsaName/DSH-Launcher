@@ -1034,7 +1034,8 @@ public sealed partial class ExtensionService
         NodeRuntimeInfo? nodeRuntime,
         CancellationToken cancellationToken = default)
     {
-        var first = await RunAllowVersionAsync(instance, packageVersion, runtimeVersion, nodeRuntime, cancellationToken);
+        var first = await RunVersionExemptionAsync(
+            instance, "allow-version", packageVersion, runtimeVersion, acceptRisk: true, nodeRuntime, cancellationToken);
         if (first.Ok)
         {
             return first;
@@ -1046,30 +1047,65 @@ public sealed partial class ExtensionService
             return first;
         }
 
-        var retry = await RunAllowVersionAsync(instance, packageVersion, required, nodeRuntime, cancellationToken);
+        var retry = await RunVersionExemptionAsync(
+            instance, "allow-version", packageVersion, required, acceptRisk: true, nodeRuntime, cancellationToken);
         return retry.Ok
             ? retry with { Message = $"已按上游实际运行的 DSH {required} 放行（实例登记的版本是 {runtimeVersion}）。" }
             : retry;
     }
 
-    private async Task<PluginVersionExemptionResult> RunAllowVersionAsync(
+    /// <summary>
+    /// 撤销一条精确版本豁免（等价于 <c>dsh plugin --profile &lt;p&gt; revoke-version &lt;pkg@ver&gt; --dsh-version &lt;v&gt;</c>）。
+    /// 同样走上游 CLI：撤销不需要 <c>--accept-risk</c>（风险只属于放行），且上游允许撤销历史版本。
+    /// </summary>
+    public Task<PluginVersionExemptionResult> RevokePluginVersionAsync(
         ManagerInstance instance,
         string packageVersion,
         string runtimeVersion,
         NodeRuntimeInfo? nodeRuntime,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default) =>
+        RunVersionExemptionAsync(
+            instance, "revoke-version", packageVersion, runtimeVersion, acceptRisk: false, nodeRuntime, cancellationToken);
+
+    /// <summary>
+    /// 构造豁免子命令的参数表（可测）：<c>plugin --profile &lt;p&gt; &lt;command&gt; &lt;pkg@ver&gt; --dsh-version &lt;v&gt; [--accept-risk]</c>。
+    /// 顺序与上游 <c>versionCommand</c> 的解析一致；<b>绝不</b>带 <c>--reporter</c> / 安装模式那类 pnpm 选项
+    /// （上游对未知参数直接报 unexpected argument）。
+    /// </summary>
+    internal static IReadOnlyList<string> BuildVersionExemptionArguments(
+        string profile,
+        string command,
+        string packageVersion,
+        string runtimeVersion,
+        bool acceptRisk)
     {
-        var spec = ResolvePluginLaunchSpec(instance, nodeRuntime);
-        // 参数顺序与上游 versionCommand 的解析一致；绝不加 --reporter / 安装模式那类 pnpm 选项
-        // （上游对未知参数是直接报 unexpected argument）。
         var arguments = new List<string>
         {
             "plugin",
-            "--profile", _activeProfile(instance),
-            "allow-version", packageVersion,
-            "--dsh-version", runtimeVersion,
-            "--accept-risk"
+            "--profile", profile,
+            command, packageVersion,
+            "--dsh-version", runtimeVersion
         };
+        if (acceptRisk)
+        {
+            arguments.Add("--accept-risk");
+        }
+
+        return arguments;
+    }
+
+    private async Task<PluginVersionExemptionResult> RunVersionExemptionAsync(
+        ManagerInstance instance,
+        string command,
+        string packageVersion,
+        string runtimeVersion,
+        bool acceptRisk,
+        NodeRuntimeInfo? nodeRuntime,
+        CancellationToken cancellationToken)
+    {
+        var spec = ResolvePluginLaunchSpec(instance, nodeRuntime);
+        var arguments = BuildVersionExemptionArguments(
+            _activeProfile(instance), command, packageVersion, runtimeVersion, acceptRisk);
         var startInfo = DshRuntimeCommandFactory.Create(
             spec,
             arguments,
@@ -1084,12 +1120,14 @@ public sealed partial class ExtensionService
         if (output.ExitCode == 0)
         {
             LauncherLog.Info(
-                "已写入插件精确版本豁免。",
+                command == "allow-version" ? "已写入插件精确版本豁免。" : "已撤销插件精确版本豁免。",
                 ErrorCodes.E2020,
-                new { package = packageVersion, dshVersion = runtimeVersion, profile = _activeProfile(instance), output = combined });
+                new { command, package = packageVersion, dshVersion = runtimeVersion, profile = _activeProfile(instance), output = combined });
             return new PluginVersionExemptionResult(
                 true,
-                $"已放行 {packageVersion}（仅对 DSH {runtimeVersion} 生效，下次启动生效）。",
+                command == "allow-version"
+                    ? $"已放行 {packageVersion}（仅对 DSH {runtimeVersion} 生效，下次启动生效）。"
+                    : $"已撤销 {packageVersion} 对 DSH {runtimeVersion} 的放行（重启后生效）。",
                 combined);
         }
 

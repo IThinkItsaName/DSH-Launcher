@@ -69,6 +69,23 @@ public sealed record PluginVersionExemptions(
 public sealed record PluginVersionExemptionResult(bool Ok, string Message, string Output);
 
 /// <summary>
+/// 放行记录在界面上的一行：**一个「包@版本」× 一个 DSH 版本**（撤销就是按这对精确版本操作的）。
+/// </summary>
+/// <param name="PackageVersion">精确的 <c>包名@版本</c>（原样写回上游 CLI）。</param>
+/// <param name="PackageName">拆出的包名（展示用）。</param>
+/// <param name="PluginVersion">拆出的插件版本（展示用）。</param>
+/// <param name="DshVersion">该放行适用的精确 DSH 版本。</param>
+public sealed record PluginExemptionRow(
+    string PackageVersion,
+    string PackageName,
+    string PluginVersion,
+    string DshVersion)
+{
+    /// <summary>列表里的主文案。</summary>
+    public string Display => $"{PackageVersion} → DSH {DshVersion}";
+}
+
+/// <summary>
 /// 只读解析 profile 的 <c>compatibility.json</c>（上游 <c>PROFILE_COMPATIBILITY_FILENAME</c>）。
 ///
 /// <para>
@@ -242,6 +259,27 @@ public static class PluginVersionExemptionService
             Rewritable: false,
             path,
             FileExists: true);
+
+    /// <summary>
+    /// 把放行记录摊平成界面行（**一条 = 一个「包@版本」× 一个 DSH 版本**）：顺序＝<c>包名@版本</c> 升序，
+    /// 同一记录内的 DSH 版本保持原文件顺序（上游写入时已去重）。
+    /// </summary>
+    public static IReadOnlyList<PluginExemptionRow> ToRows(PluginVersionExemptions exemptions)
+    {
+        var rows = new List<PluginExemptionRow>();
+        foreach (var (key, versions) in exemptions.Entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            var separator = key.LastIndexOf('@');
+            var packageName = separator > 0 ? key[..separator] : key;
+            var pluginVersion = separator > 0 ? key[(separator + 1)..] : string.Empty;
+            foreach (var dshVersion in versions)
+            {
+                rows.Add(new PluginExemptionRow(key, packageName, pluginVersion, dshVersion));
+            }
+        }
+
+        return rows;
+    }
 
     /// <summary>界面/日志用：把放行记录描述成一行（<c>pkg@1.2.3 → DSH 0.1.7-rc.2</c>，多条用 <c>；</c> 连接）。</summary>
     public static string Describe(PluginVersionExemptions exemptions)
