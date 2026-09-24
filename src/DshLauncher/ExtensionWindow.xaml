@@ -242,7 +242,7 @@
                             <Button Style="{StaticResource CompactToolbarDangerButton}" x:Name="RemoveButton" Content="删除" Click="Remove_Click" />
                         </WrapPanel>
                         <TextBlock x:Name="HintText"
-                                   Text="修改前请停止实例。Plugin 和 MCP 会在下次启动时生效。该实例的插件详情与检查工具在「实例设置 → 插件管理」（点标题栏上的实例名即可进入）。"
+                                   Text="修改前请停止实例。Plugin 和 MCP 会在下次启动时生效。该实例的插件清单与检查工具在「实例设置 → 插件管理」（点标题栏上的实例名即可进入）。"
                                    Foreground="{StaticResource MutedBrush}"
                                    FontSize="11"
                                    TextWrapping="Wrap"

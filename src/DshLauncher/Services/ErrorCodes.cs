@@ -14,6 +14,7 @@ public static class ErrorCodes
     public const string E1004 = "E1004"; // Launcher 日志写入失败
     public const string E1005 = "E1005"; // 诊断包导出被取消
     public const string E1006 = "E1006"; // 便携版 Node.js 准备失败
+    // E1007 为历史保留号（未使用，勿复用；与契约清单 C18 同类，见 docs/UI-DESIGN.md「术语与文案」）。
     public const string E1008 = "E1008"; // DSh 安装位置移动失败
     public const string E1009 = "E1009"; // exe 同目录不可写，默认安装位置回退
     public const string E1010 = "E1010"; // WebView2 数据目录回退

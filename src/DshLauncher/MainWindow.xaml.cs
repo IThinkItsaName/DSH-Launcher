@@ -4699,7 +4699,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         var saveButton = new System.Windows.Controls.Button
         {
-            Content = "保存",
+            Content = "保存守护设置",
             Style = (Style)FindResource("PrimaryButton"),
             Padding = new Thickness(14, 9, 14, 9)
         };

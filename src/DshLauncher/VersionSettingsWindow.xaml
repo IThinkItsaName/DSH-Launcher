@@ -466,7 +466,7 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBox x:Name="NodePathBox" />
-                                <Button Grid.Column="1" Content="浏览…" Click="BrowseNode_Click" Margin="8,0,0,0" />
+                                <Button Grid.Column="1" Content="选择文件" Click="BrowseNode_Click" Margin="8,0,0,0" />
                             </Grid>
                             <TextBlock x:Name="NodeRuntimeText"
                                        Foreground="{StaticResource MutedBrush}"

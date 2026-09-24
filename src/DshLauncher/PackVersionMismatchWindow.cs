@@ -131,7 +131,7 @@ public sealed class PackVersionMismatchWindow : Window
         };
         var pickButton = new System.Windows.Controls.Button
         {
-            Content = "选择…",
+            Content = "选择文件夹",
             MinWidth = 72,
             Margin = new Thickness(8, 0, 0, 0)
         };
