@@ -7,12 +7,15 @@
 > 靠"升完再发现"代价很高；这张表是止血工具（借鉴清单 #23）。
 >
 > - 上游权威来源优先级：**已安装运行时**（安装目录由 `VersionSettingsService.ResolveDshInstallDirectory()` 决定；本机 2026-09-14 起重装为
->   `%ProgramFiles(x86)%\dsh_launcher\run_time\versions\<版本>\node_modules\@deepseek-ai\dsh`，用户实际在跑的东西）
+>   `%ProgramFiles(x86)%\dsh_launcher\run_time\versions\<版本>\node_modules\@deepseek-ai\dsh`；
+>   2026-09-24 实测本机的载荷直接落在 `run_time\node_modules\@deepseek-ai\dsh`（`versions\` 存在但为空），
+>   探针两种布局都能解析，用户实际在跑的东西以探针输出为准）
 > ＞ 本地上游克隆 `deepseek-harness/`（最新源码，用于提前发现漂移）。
 > - 哨兵实现在 `_verify-p0/Program.cs` 的「契约哨兵」段，命名前缀 `contract:`。
 > - 已安装运行时的定位**不再写死版本号**（2026-09-15，work-log/156）：探针遍历 `versions/` 按版本降序取包根，
 >   并先跑 `contract: 已安装运行时包根可解析（C1/C2/C6 探针前置）`；该前置 FAIL 时先修路径/重装，不要当作契约破坏。
-> - 最近核对：上游 `0d1f50007f`（2026-09-15，`master`，`dsh-v0.1.6-alpha.1-5-g…`，较上次核对 +666 提交）、安装运行时 `0.1.5-rc.2`（2026-09-15，work-log/156）。
+> - 最近核对：上游 `00102833`（2026-09-22，`dsh-v0.1.7-alpha.2`）、安装运行时 `0.1.7-rc.1`（2026-09-24 核对；上一次记录 0.1.5-rc.2 已过时）。
+> - 编号 **C18** 为历史保留号（对应能力已并入 C13/C17），表中不单列。
 
 ## 一、契约表
 

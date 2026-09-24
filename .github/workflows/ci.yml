@@ -36,13 +36,10 @@ jobs:
       - name: SelfTest（仓库自带纯逻辑自测：命名规则 / 版本比较 / profile / 任务台账 / 存储边界 / 会话代际）
         run: dotnet run --project tests/DshLauncher.SelfTest/DshLauncher.SelfTest.csproj -c Release
 
-      - name: Publish（框架依赖小包 → dist/DSH Launcher.App.exe，变更集 164）
+      - name: Publish（框架依赖小包 → dist/DSH Launcher.exe，变更集 169）
         run: dotnet publish src/DshLauncher/DshLauncher.csproj -c Release -o dist
 
-      # 发布物是两个文件（变更集 165）：DSH Launcher.exe（自检引导器，net48）+ DSH Launcher.App.exe（主程序）
-      - name: Build bootstrapper（自检引导器）
-        run: dotnet build src/DshLauncher.Bootstrapper/DshLauncher.Bootstrapper.csproj -c Release
-
-      - name: Assemble release（拷引导器进 dist）
-        shell: pwsh
-        run: Copy-Item "src/DshLauncher.Bootstrapper/bin/Release/net48/DSH Launcher.exe" "dist/DSH Launcher.exe"
+      # 变更集 169 起默认产物就是**一个**文件 dist/DSH Launcher.exe（AssemblyName=DSH Launcher），
+      # 不需要任何后续拷贝。变更集 165–168 的自检引导器仍可用源码打「两个文件」版本，但必须显式
+      # 给主程序加 -p:AssemblyName="DSH Launcher.App" 并单独 build 引导器；
+      # 绝不能把 net48 的引导器复制成 dist/DSH Launcher.exe——那会覆盖主程序。

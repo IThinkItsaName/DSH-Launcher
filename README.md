@@ -124,6 +124,7 @@ dsh-launcher-dev/
 | [docs/ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md) | 架构决策记录 |
 | [docs/BEHAVIOR_MATRIX.md](docs/BEHAVIOR_MATRIX.md) | 行为矩阵 |
 | [docs/UI-UNIFICATION-TODO.md](docs/UI-UNIFICATION-TODO.md) | UI 统一待办（挂起中） |
+| [docs/FEATURE-INVENTORY.md](docs/FEATURE-INVENTORY.md) | **功能台账**：三级分类（12 域 / 85 L2 / 281 L3）+ 界面承载矩阵 + 完整性四口径判定 + 缺口清单 + 界面布局建议 |
 | [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) | 第三方组件与许可（Tabler Icons 等） |
 
 ## 实现方式说明

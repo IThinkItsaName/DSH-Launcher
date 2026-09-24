@@ -135,6 +135,35 @@
                                     Padding="{StaticResource CardPadding}"
                                     Margin="0,14,0,0">
                                 <StackPanel>
+                                    <TextBlock Text="启动方式" FontWeight="SemiBold" />
+                                    <TextBlock Text="实例卡片上「启动」按钮右侧的 ▼ 菜单与本项是同一份设置。Web 启动：dsh 原生方式，服务启动后由 dsh 在默认浏览器打开 WebUI；Desktop 启动：用启动器内部窗口承载 WebUI（不会重复弹浏览器）；隔离启动：剥离第三方插件、不改你的配置；未设置则按运行时自动。"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,6,0,0" />
+                                    <ComboBox x:Name="OpenModeBox"
+                                              SelectedValuePath="Tag"
+                                              SelectionChanged="OpenModeBox_SelectionChanged"
+                                              AutomationProperties.Name="默认启动方式"
+                                              Height="36"
+                                              Margin="0,12,0,0">
+                                        <ComboBoxItem Content="Web 启动（dsh 原生运行方式）" Tag="Web" />
+                                        <ComboBoxItem Content="Desktop 启动（启动器所带的方式）" Tag="Desktop" />
+                                        <ComboBoxItem Content="隔离启动（剥离第三方插件，不改你的配置）" Tag="Isolated" />
+                                        <ComboBoxItem Content="未设置（按运行时自动）" Tag="Unset" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="OpenModeStatusText"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11"
+                                               TextWrapping="Wrap"
+                                               Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource InfoBackgroundBrush}"
+                                    CornerRadius="{StaticResource PanelCornerRadius}"
+                                    Padding="{StaticResource CardPadding}"
+                                    Margin="0,14,0,0">
+                                <StackPanel>
                                     <TextBlock Text="实例环境变量" FontWeight="SemiBold" />
                                     <TextBlock Text="启动这个实例时注入进程环境；DSH_HOME / DSH_AGENTS_HOME / PATH 由 Launcher 管理，不能覆盖。含 KEY / TOKEN / SECRET / PASSWORD 等敏感值会用当前 Windows 账户加密后落盘，诊断包不包含变量值。"
                                                Foreground="{StaticResource MutedBrush}"
@@ -294,6 +323,17 @@
                                        Foreground="{StaticResource BlueBrush}"
                                        TextWrapping="Wrap"
                                        Margin="0,16,0,0" />
+                            <TextBlock Text="这里的选项与「设置 / 诊断 → 常规 → 版本数据同步」是同一份数据；工作区的新增 / 重命名 / 删除在那边。"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap"
+                                       FontSize="11"
+                                       Margin="0,16,0,0" />
+                            <Button x:Name="OpenSettingsSyncButton"
+                                    Content="去设置 → 常规（工作区 / 全版本同步）"
+                                    Click="OpenSettingsSync_Click"
+                                    Padding="12,7"
+                                    HorizontalAlignment="Left"
+                                    Margin="0,10,0,0" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -320,6 +360,12 @@
                                             Click="RefreshPlugins_Click"
                                             Padding="14,6"
                                             Margin="8,0,0,0" />
+                                    <Button x:Name="OpenExtensionsButton"
+                                            Content="去扩展页"
+                                            Click="OpenExtensions_Click"
+                                            Padding="14,6"
+                                            Margin="8,0,0,0"
+                                            ToolTip="安装 / 市场 / 更新在「扩展」页；本页只管理该实例已安装插件的启用 / 禁用 / 删除与依赖自检" />
                                 </StackPanel>
                             </Grid>
                             <TextBlock x:Name="PluginEmptyText"

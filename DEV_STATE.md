@@ -6,6 +6,8 @@
 
 ## 已完成内容
 
+- 本轮（2026-09-24，变更集 170，S1 入口整理）：① 新增 `docs/FEATURE-INVENTORY.md`（功能台账 + 完整性四口径判定 + 缺口清单 + 布局建议）；② 修掉 CI 用引导器覆盖主程序（`.github/workflows/ci.yml`），对齐 `VERIFICATION.md` 的构建前置、`CURRENT_DESIGN.md` 三处页面描述、契约清单 C18 与最新核对信息；③ 删除全仓零引用的 `Services/ProviderDiagnosticService.cs`；④ 「默认启动方式」下拉回到「实例设置 → 个性化」（与实例卡片 ▼ 菜单同一份 `OpenMode`，只改启动方式、不触发同步、不建快照）；⑤ 重复入口互相跳转（实例设置→插件管理 ↔ 扩展页；实例设置→配置 ↔ 设置→常规，跳转直接落在“常规”分类）。验证：构建 0/0、SelfTest 204/0、harness 388/0/0（含 2 条新增 S1 门禁）。**未覆盖**：新下拉与两个跳转按钮的真机 UIA 目视（会触碰真实实例数据与跨版本同步，未做）。
+- 本轮（2026-09-24，审计与文档/CI 部分）：新增 `docs/FEATURE-INVENTORY.md`——三级功能台账（12 域 / 85 L2 / 281 L3）+ 界面承载矩阵 + 完整性四口径判定（构建 0/0、SelfTest 204/0、harness 386/0/0、真机冒烟）+ 缺口清单（A1–A8 / B1–B12）+ 界面布局建议（P1–P9 / S1–S5）。据审计同步修正 4 处文档/CI 不一致：CI 不再把引导器复制覆盖主程序（`.github/workflows/ci.yml`）；`docs/VERIFICATION.md` 构建前置改为全局 .NET 8 SDK（与 README 一致）；`CURRENT_DESIGN.md` 修正标题栏导航、版本设置页导航、版本控制页能力三处描述；`docs/DSH_CONTRACT_INVENTORY.md` 补 C18 保留号说明与最新核对信息（上游 `00102833` / 安装运行时 `0.1.7-rc.1`）。
 - 本轮修复：DeepSeek Chat 继续保持无 Owner 窗口，并在 HWND 创建后写入独立的窗口级 AppUserModelID；因此它不再与 Launcher 共用任务栏分组，同时保留黑色 DeepSeek 图标以及现有实例生命周期清理。
 - 本轮新增：任意版本可在“版本设置 → 个性化 → 绑定打开方式”中手动选择 EXE、COM、BAT、CMD、PowerShell 脚本、LNK 快捷方式或其它 Windows 可打开文件。启动页主按钮改为“打开窗口”，同时保留 Launcher 启动；可直接启动的目标继承当前版本 `DSH_HOME` 和 `DSH_AGENTS_HOME`。本机绑定路径不会进入 `.dshpack`。
 - 本轮新增：Managed 实例运行时，未安装的市场 Plugin 显示“热加载”；点击后先检查该实例的 dsh-market 状态和候选目录 URL，满足条件时调用官方 loopback `/install`，已安装项更新调用 `/update`。dsh-market 不可用、实例关闭热加载或候选不在其目录时，不再直接修改运行中 profile，而是提示停止实例后普通安装。停止实例仍使用现有 DSh Plugin CLI。
@@ -72,6 +74,8 @@
 - `src/DshLauncher/Services/MarketplaceService.cs`、`Models/MarketplaceModels.cs`、`ThemePreviewWindow.cs`：市场缓存、来源合并、搜索、排序、GitHub/monorepo 校验、安装状态、开发者头像地址和 README 图片预览。
 - `src/DshLauncher/Services/SkillMarketService.cs`、`Models/SkillMarketModels.cs`：Skill 市场缓存、GitHub 发现、SKILL.md 校验和实例导入。
 - `src/DshLauncher/Services/VersionSettingsService.cs`、`VersionOpenTargetService.cs`、`ShortcutTargetResolver.cs`、`VersionPackageService.cs`、`VersionSnapshotService.cs`、`DshVersionCatalogService.cs`、`VersionControlWindow.xaml(.cs)`、`VersionSettingsWindow.xaml(.cs)`、`NewVersionWindow.xaml(.cs)`：版本同步策略、手动打开方式、快捷方式解析、工作区管理、DSh 版本选择与精确安装、版本复制/删除、加密快照回滚、设置和 `.dshpack`。
+- `src/DshLauncher/Services/ProviderDiagnosticService.cs`：Provider 诊断（只调模型列表端点、不发 chat/completions）；启动页的 Provider 卡片与网络诊断已移除，**当前全仓 0 引用**（保留或删除待定，见 `docs/FEATURE-INVENTORY.md` §4-A5）。
+- `src/DshLauncher/Services/VersionOpenTargetService.cs`：**上游 v1.0.7 原样保留的死代码**（避免 PR 出现无关删除，见 `docs/DIFF-REPORT.md` §0.3）。
 - `src/DshLauncher/Services/VersionHealthService.cs`、`DshSettingsYamlValidator.cs`、`VersionSnapshotService.cs`、`Models/VersionHealthModels.cs`：版本体检、DSh YAML 语义校验、安全自动修复和当前 Windows 用户加密的配置回滚点。
 - `src/DshLauncher/Services/ModelService.cs`、`ModelProviderSyncService.cs`、`ProviderStateService.cs`：Provider 配置、同步和启用状态。
 - `src/DshLauncher/Services/ConversationService.cs`、`ConversationSyncService.cs`、`ConversationWindow.xaml(.cs)`：会话文件管理、打开入口和同步策略。

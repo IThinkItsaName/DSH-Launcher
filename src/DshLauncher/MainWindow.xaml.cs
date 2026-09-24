@@ -84,6 +84,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly HashSet<string> _recentInstanceIds = new(StringComparer.Ordinal);
     private ManagerInstance? _selectedInstance;
     private string _versionSettingsReturnSection = "启动";
+
+    /// <summary>S1：跳进「设置 / 诊断」时要直接落到哪个分类（空＝第一个分类“运行环境”）。</summary>
+    private string? _pendingSettingsCategory;
     private bool _isNodeDetectionInProgress;
     private readonly Services.LifecycleBusyGuard _lifecycleGuard = new();
     private bool _isLifecycleInProgress => _lifecycleGuard.IsBusy;
@@ -2470,7 +2473,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     : Array.Empty<string>(),
                 instance => _instanceRunner.IsRunning(instance.Id),
                 RunPluginBisectAsync,
-                DisablePluginAndStartAsync)));
+                DisablePluginAndStartAsync),
+            openExtensions: () => SwitchSection("扩展"),
+            openSettingsSync: () =>
+            {
+                _pendingSettingsCategory = "常规";
+                SwitchSection("设置 / 诊断");
+            },
+            launchModeChanged: () => OnPropertyChanged(nameof(StartInstanceButtonText))));
         OnPropertyChanged(nameof(PageTitle));
         OnPropertyChanged(nameof(PageSubtitle));
     }
@@ -3511,7 +3521,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         RefreshMoveSources();
         host.Loaded += (_, _) => RefreshMoveSources();
-        SelectCategory(0);
+        // S1：允许从「实例设置 → 配置」跳进来时直接落到“常规”分类。
+        var initialCategory = Array.FindIndex(
+            categories,
+            category => string.Equals(category.Title, _pendingSettingsCategory, StringComparison.Ordinal));
+        _pendingSettingsCategory = null;
+        SelectCategory(initialCategory >= 0 ? initialCategory : 0);
         return host;
     }
 
@@ -4910,6 +4925,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Margin = new Thickness(0, 12, 0, 0)
         };
         versionCardContent.Children.Add(versionStatus);
+        var openInstanceSettingsButton = new System.Windows.Controls.Button
+        {
+            Name = "OpenVersionSettingsFromSyncButton",
+            Content = "打开该版本的实例设置",
+            Padding = new Thickness(12, 7, 12, 7),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Left,
+            ToolTip = "同一份数据：在「实例设置 → 配置」里逐项编辑这个版本的同步范围",
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        openInstanceSettingsButton.Click += (_, _) =>
+        {
+            if (versionBox.SelectedItem is not ManagerInstance target)
+            {
+                ShowNotice("请先选择一个版本。");
+                return;
+            }
+
+            SelectedInstance = target;
+            ShowVersionSettings();
+        };
+        versionCardContent.Children.Add(openInstanceSettingsButton);
         panel.Children.Add(versionCard);
 
         var workspaceCardContent = new StackPanel();

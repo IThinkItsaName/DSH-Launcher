@@ -34,6 +34,10 @@ public partial class VersionSettingsWindow : UserControl
     private const string EnvironmentNameTag = "EnvironmentName";
     private const string EnvironmentValueTag = "EnvironmentValue";
     private VersionSettingsData _settings = new();
+    private bool _syncingOpenModeBox;
+    private readonly Action? _openExtensions;
+    private readonly Action? _openSettingsSync;
+    private readonly Action? _launchModeChanged;
 
     public VersionSettingsWindow(
         ManagerInstance? instance,
@@ -45,9 +49,15 @@ public partial class VersionSettingsWindow : UserControl
         Func<ManagerInstance, string, ManagerInstance> renameVersion,
         Action settingsSaved,
         bool openPluginPage = false,
-        InstanceHealthProviders? healthProviders = null)
+        InstanceHealthProviders? healthProviders = null,
+        Action? openExtensions = null,
+        Action? openSettingsSync = null,
+        Action? launchModeChanged = null)
     {
         _healthProviders = healthProviders;
+        _openExtensions = openExtensions;
+        _openSettingsSync = openSettingsSync;
+        _launchModeChanged = launchModeChanged;
         _instance = instance;
         _versions = versions.ToArray();
         _settingsService = settingsService;
@@ -82,6 +92,7 @@ public partial class VersionSettingsWindow : UserControl
             ? "版本设置需要绑定到一个真实版本。请先在启动页选择实例，或在版本控制中创建版本。"
             : $"{_instance.KindText} · {_instance.RootPath}\n状态：{_instance.StatusText}";
         DshHomeText.Text = _instance?.DshHome ?? "尚未创建 DSH_HOME";
+        ApplyOpenModeChoices();
         PackageExtensionBox.Text = _packageService.PackageExtension;
         NodeRuntimeText.Text = FormatNodeRuntime();
 
@@ -1238,7 +1249,108 @@ public partial class VersionSettingsWindow : UserControl
         OpenMode = _settings.OpenMode,
     };
 
+    /// <summary>
+    /// 「默认启动方式」下拉（与启动页实例卡片 ▼ 菜单共用 version-settings.json 的 OpenMode）：
+    /// 只展示存储值与实际生效的差别，不在读路径上回写；选择即保存（与 ▼ 菜单同一语义）。
+    /// </summary>
+    private void ApplyOpenModeChoices()
+    {
+        if (_instance is null)
+        {
+            return;
+        }
+
+        var stored = _settings.OpenMode;
+        _syncingOpenModeBox = true;
+        try
+        {
+            OpenModeBox.SelectedValue = stored is null ? "Unset" : stored.Value.ToString();
+        }
+        finally
+        {
+            _syncingOpenModeBox = false;
+        }
+
+        OpenModeStatusText.Text = BuildOpenModeStatus(stored, HasVendorDesktopSurface());
+    }
+
+    private static string BuildOpenModeStatus(VersionOpenMode? stored, bool vendorDesktopSurface)
+    {
+        if (stored is null)
+        {
+            return "未设置：按运行时自动——运行时自带桌面封装时打开原生窗口，否则按 Web 启动。";
+        }
+
+        return stored.Value switch
+        {
+            VersionOpenMode.Isolated =>
+                "当前按「隔离启动」生效：剥离第三方插件、保留 dsh 核心，不会修改你的 profile 与配置。",
+            VersionOpenMode.Desktop when vendorDesktopSurface =>
+                "当前版本存储的是 Desktop 启动，但该运行时自带桌面封装，因此实际按 Web 启动生效（与实例卡片 ▼ 菜单一致）。",
+            VersionOpenMode.Desktop =>
+                "当前按「Desktop 启动」生效：服务启动后自动打开启动器内部窗口，不会重复弹浏览器。",
+            _ => "当前按「Web 启动」生效：服务启动后由 dsh 在默认浏览器打开 WebUI。"
+        };
+    }
+
+    /// <summary>该实例当前 profile 是否含 dsh 自带的 desktop surface bundle（判不到＝false，与启动页同一判据）。</summary>
+    private bool HasVendorDesktopSurface()
+    {
+        if (_instance is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var profileName = DshProfileService.ResolveActiveName(_instance, _settingsService);
+            var profileInfo = new DshProfileService().Describe(_instance, profileName);
+            return PresentationSurfaceService.HasVendorDesktopSurface(profileInfo.Bundles);
+        }
+        catch
+        {
+            return false; // 判不到不替换（work-log/81 §七.5）
+        }
+    }
+
+    private void OpenModeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingOpenModeBox || _instance is null)
+        {
+            return;
+        }
+
+        var target = OpenModeBox.SelectedValue?.ToString() switch
+        {
+            "Web" => VersionOpenMode.Web,
+            "Isolated" => VersionOpenMode.Isolated,
+            "Desktop" => VersionOpenMode.Desktop,
+            _ => (VersionOpenMode?)null
+        };
+
+        try
+        {
+            var updated = CopySettings();
+            updated.OpenMode = target;
+            _settingsService.Save(_instance, updated);
+            _settings = updated;
+            // 与实例卡片 ▼ 菜单同一语义（work-log/82）：只改启动方式，不触发同步 / 不建快照。
+            OpenModeStatusText.Text = BuildOpenModeStatus(target, HasVendorDesktopSurface());
+            _launchModeChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            OpenModeStatusText.Text = "保存启动方式失败：" + ex.Message;
+        }
+    }
+
     private async void RefreshPlugins_Click(object sender, RoutedEventArgs e) => await LoadPluginsAsync();
+
+    /// <summary>S1 入口去重：「实例设置 → 插件管理」↔「扩展」页的互相跳转（两处保留，数据同一份）。</summary>
+    private void OpenExtensions_Click(object sender, RoutedEventArgs e) => _openExtensions?.Invoke();
+
+    /// <summary>S1 入口去重：「实例设置 → 配置」↔「设置 / 诊断 → 常规 → 版本数据同步」的互相跳转。</summary>
+    private void OpenSettingsSync_Click(object sender, RoutedEventArgs e) => _openSettingsSync?.Invoke();
 
     /// <summary>
     /// 依赖自检（doctor）：原在扩展页工具条的「依赖自检」按钮，变更集 158 按用户要求合并到实例设置的

@@ -4,11 +4,10 @@
 
 ## ① 构建（0 警告 0 错误）
 
+前置：**.NET 8 SDK**（本机为全局 `C:\Program Files\dotnet` 8.0.425，**不需要** `DOTNET_ROOT`）。
+
 ```powershell
-$env:DOTNET_ROOT = 'D:\Program Files (x86)\dsh_from_github\dotnet-sdk'   # 本机自备 SDK
-$env:PATH = $env:DOTNET_ROOT + ';' + $env:PATH
-cd src\DshLauncher
-dotnet build -c Release
+dotnet build src\DshLauncher\DshLauncher.csproj -c Release
 ```
 
 ## ② 仓库自测（`tests/DshLauncher.SelfTest`）
@@ -46,7 +45,9 @@ dotnet bin\Release\net8.0-windows\win-x64\VerifyP0.dll --ui 2>&1 | Tee-Object lo
 # 1) 必须先停启动器，否则 dist\DSH Launcher.exe 被锁 → MSB4018
 Stop-Process -Name 'DSH Launcher' -Force -ErrorAction SilentlyContinue
 # 2) 构建 + 自测 + 发布
-dotnet build -c Release
+#    默认产物 = 单文件 dist\DSH Launcher.exe（约 3.62 MB；目标机需 .NET 8 Desktop Runtime (x64)）
+#    免装 .NET 的大包：在上面的 publish 后再加 -p:SelfContained=true（约 64.8 MB）
+dotnet build src\DshLauncher\DshLauncher.csproj -c Release
 dotnet run --project tests\DshLauncher.SelfTest\DshLauncher.SelfTest.csproj -c Release
 dotnet publish src\DshLauncher\DshLauncher.csproj -c Release -o dist
 # 3) 复制到安装目录并与 dist 核对 MD5（两者必须一致）
