@@ -36,7 +36,76 @@ public partial class PluginMatrixWindow : UserControl
 
     private async void Window_OnLoaded(object sender, RoutedEventArgs e)
     {
+        // 变更集 174（B3b）：矩阵列头点击排序（插件名 / 版本 / 各实例状态列）。
+        MatrixList.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(MatrixHeader_Click));
         await RefreshAsync();
+    }
+
+    private string? _sortKey;
+    private bool _sortAscending = true;
+
+    /// <summary>当前排序在状态行里的说法（未点过列头时为空，表示保持服务层默认顺序）。</summary>
+    private string SortSummary => _sortKey switch
+    {
+        null => string.Empty,
+        "name" => $"，按 插件 名称{(_sortAscending ? "升序" : "降序")}",
+        "version" => $"，按 版本{(_sortAscending ? "升序" : "降序")}",
+        { } id => $"，按 {_matrix.Columns.FirstOrDefault(column => column.InstanceId == id)?.InstanceName ?? "实例"} 状态{(_sortAscending ? "升序" : "降序")}"
+    };
+
+    /// <summary>
+    /// 列头点击：切列或反向。键为 <c>name</c> / <c>version</c> / 实例 ID（状态列按中文状态文本排序）。
+    /// 行的默认顺序仍由服务层决定，只有用户点过列头才重排。
+    /// </summary>
+    private void MatrixHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader header
+            || header.Column is null
+            || MatrixList.View is not GridView view)
+        {
+            return;
+        }
+
+        var index = view.Columns.IndexOf(header.Column);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var key = index switch
+        {
+            0 => "name",
+            1 => "version",
+            _ => index - 2 < _matrix.Columns.Count ? _matrix.Columns[index - 2].InstanceId : null
+        };
+        if (key is null)
+        {
+            return;
+        }
+
+        _sortAscending = string.Equals(_sortKey, key, StringComparison.Ordinal) ? !_sortAscending : true;
+        _sortKey = key;
+        RenderMatrix();
+    }
+
+    /// <summary>应用当前排序（未点过列头时保持服务层的行序）。</summary>
+    private IReadOnlyList<PluginMatrixRow> SortRows(IReadOnlyList<PluginMatrixRow> rows)
+    {
+        if (_sortKey is not { } key)
+        {
+            return rows;
+        }
+
+        Func<PluginMatrixRow, string> selector = key switch
+        {
+            "name" => row => row.Name,
+            "version" => row => row.Version ?? string.Empty,
+            _ => row => row[key]
+        };
+        var comparer = StringComparer.CurrentCultureIgnoreCase;
+        return (_sortAscending
+            ? rows.OrderBy(selector, comparer)
+            : rows.OrderByDescending(selector, comparer)).ToArray();
     }
 
     private void Window_OnUnloaded(object sender, RoutedEventArgs e)
@@ -148,10 +217,11 @@ public partial class PluginMatrixWindow : UserControl
 
         MatrixList.View = view;
         MatrixList.ItemContainerStyle = TryFindResource("TableRowStyle") as Style;
-        MatrixList.ItemsSource = _matrix.Rows;
+        MatrixList.ItemsSource = SortRows(_matrix.Rows);
         EmptyText.Visibility = _matrix.Rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         StatusText.Text = _matrix.Columns.Count == 0
             ? "还没有实例。"
-            : $"{_matrix.Columns.Count} 个实例 · {_matrix.Rows.Count} 个插件 · 已启用 {_matrix.EnabledCount} 处";
+            : $"{_matrix.Columns.Count} 个实例 · {_matrix.Rows.Count} 个插件 · 已启用 {_matrix.EnabledCount} 处"
+                + SortSummary + "（点列头排序）";
     }
 }

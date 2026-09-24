@@ -180,6 +180,8 @@
   - 挂载方式：`GridView ColumnHeaderContainerStyle="{StaticResource TableColumnHeaderStyle}"` + `ListView ItemContainerStyle="{StaticResource TableRowStyle}"`；动态生成的列（插件矩阵）在代码里 `view.ColumnHeaderContainerStyle = TryFindResource(...)`。已覆盖：对话页 3 张表 + 插件矩阵 + 任务页行；新表必须显式挂载（harness 有门禁）。
   - 局部差异用 `BasedOn="{StaticResource TableRowStyle}"`（指向 **keyed** 样式是安全的——禁止的只是指向隐式类型键）。
 - **已知缺陷（待处理，不属本次变更）**：任务页行模板用 `*` 列，而列表开了横向滚动（宽度无界测量）时 `*` 会退化成“按内容定宽”，长实例名行会出现对象/标题/状态三列**重叠**（旧截图 `screenshots/146-.../05-tasks-1180x720.png` 就有，变更集 173 前后一致）。修法同变更集 143/159：把条目宽度绑定到列表宽度或换 `Auto`+固定列。
+- **列头排序（2026-09-24，变更集 174，B3b）**：只开了**插件矩阵**（插件名 / 版本 / 各实例状态列）与**对话列表**（名称 / 实例 / 更新时间 / 大小 / 格式 / 代际）；任务页行用 `ItemTemplate`、没有 `GridView` 列头；检索结果（按命中数）与备份（按时间）有固定语义，不参与。未点列头时**保持服务层默认顺序**，点过才重排。
+  - 排序方向用**状态行文字**说明（“…，按 插件 名称升序（点列头排序）”，“…；按 更新时间降序”），**不做列头箭头**：`GridViewColumnHeader` 没有 `SortDirection` 属性，要箭头必须自定义 `HeaderTemplate` + 附加属性（实测编译报 `MC4109`），成本高于收益；也因为本仓已把图标收归 `UiIcon` 矢量注册表，不应再往列头文字里塞字形。
 允许横向滚动（`HorizontalScrollBarVisibility=Auto`）。列宽总和应 ≤ 默认窗口内容宽度，
 避免默认尺寸下就出现横向滚动条；窄窗口才出现属正常。
 

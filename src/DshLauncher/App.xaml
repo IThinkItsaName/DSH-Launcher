@@ -838,6 +838,9 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <!-- 变更集 174（B3b）：排序方向**不用列头箭头**——GridViewColumnHeader 没有 SortDirection 属性，
+                 箭头要靠自定义 HeaderTemplate + 附加属性，成本高于收益；改为在页面状态行里说明当前排序。
+                 模板保持系统默认，列宽拖拽/调整手柄不变。 -->
         </Style>
         <Style x:Key="TableRowStyle" TargetType="ListViewItem">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />

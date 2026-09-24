@@ -46,6 +46,78 @@ public partial class ConversationWindow : UserControl
         // 为什么在代码里做：GridViewColumn.Width 是像素 double，既没有 MinWidth，也不支持星号比例。
         SizeChanged += (_, _) => ApplyAdaptiveColumns();
         Loaded += (_, _) => ApplyAdaptiveColumns();
+
+        // 变更集 174（B3b）：对话列表列头点击排序（任务页无 GridView 列头、检索结果/备份各有固定语义，不参与）。
+        ConversationList.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(ConversationHeader_Click));
+    }
+
+    private string? _conversationSortKey;
+    private bool _conversationSortAscending = true;
+
+    /// <summary>列序号 → 排序键（与 ConversationWindow.xaml 里 ConversationList 的列顺序一致）。</summary>
+    private static readonly string?[] ConversationSortKeys =
+        { "name", "instance", "updated", "size", "format", "generation" };
+
+    /// <summary>当前排序在状态行里的说法（未点过列头时为空，表示保持服务层默认顺序）。</summary>
+    private string ConversationSortSummary => _conversationSortKey switch
+    {
+        null => string.Empty,
+        "name" => "；按 名称" + (_conversationSortAscending ? "升序" : "降序"),
+        "instance" => "；按 实例" + (_conversationSortAscending ? "升序" : "降序"),
+        "updated" => "；按 更新时间" + (_conversationSortAscending ? "升序" : "降序"),
+        "size" => "；按 大小" + (_conversationSortAscending ? "升序" : "降序"),
+        "format" => "；按 格式" + (_conversationSortAscending ? "升序" : "降序"),
+        _ => "；按 代际" + (_conversationSortAscending ? "升序" : "降序")
+    };
+
+    private void ConversationHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader header
+            || header.Column is null
+            || ConversationList.View is not GridView view)
+        {
+            return;
+        }
+
+        var index = view.Columns.IndexOf(header.Column);
+        if (index < 0 || index >= ConversationSortKeys.Length || ConversationSortKeys[index] is not { } key)
+        {
+            return;
+        }
+
+        _conversationSortAscending = string.Equals(_conversationSortKey, key, StringComparison.Ordinal)
+            ? !_conversationSortAscending
+            : true;
+        _conversationSortKey = key;
+        ApplyConversationFilter();
+    }
+
+    /// <summary>应用当前排序（未点过列头时返回服务层顺序）。</summary>
+    private ConversationEntry[] SortConversations(IEnumerable<ConversationEntry> items)
+    {
+        if (_conversationSortKey is not { } key)
+        {
+            return items.ToArray();
+        }
+
+        Func<ConversationEntry, object> selector = key switch
+        {
+            "name" => entry => entry.DisplayName,
+            "instance" => entry => entry.InstanceName,
+            "updated" => entry => entry.UpdatedAt,
+            "size" => entry => entry.SizeBytes,
+            "format" => entry => entry.IsCompressed,
+            _ => entry => entry.GenerationVersion
+        };
+        var comparer = Comparer<object>.Create((left, right) => left switch
+        {
+            string ls when right is string rs => string.Compare(ls, rs, StringComparison.CurrentCultureIgnoreCase),
+            IComparable lc => lc.CompareTo(right),
+            _ => 0
+        });
+        return (_conversationSortAscending
+            ? items.OrderBy(selector, comparer)
+            : items.OrderByDescending(selector, comparer)).ToArray();
     }
 
     private ObservableCollection<ConversationEntry> Entries { get; } = new();
@@ -248,7 +320,8 @@ public partial class ConversationWindow : UserControl
                 + (historical > 0
                     ? $"另有 {historical} 个历史代际未列出（dsh 读最高代际；降级前备份会一并导出）。"
                     : string.Empty)
-                + "压缩 session.jsonl.zstd 可查看、打开和导入。";
+                + "压缩 session.jsonl.zstd 可查看、打开和导入。"
+                + ConversationSortSummary;
             UpdateSelection();
         }
         catch (Exception ex)
@@ -274,19 +347,20 @@ public partial class ConversationWindow : UserControl
         if (IsLoaded)
         {
             ApplyConversationFilter();
-            StatusTextStyler.Set(StatusText, $"显示 {ConversationList.Items.Count} / {Entries.Count} 个当前版本对话文件。");
+            StatusTextStyler.Set(StatusText, $"显示 {ConversationList.Items.Count} / {Entries.Count} 个当前版本对话文件" + ConversationSortSummary + "。");
         }
     }
 
     private void ApplyConversationFilter()
     {
         var scope = (ConversationScopeBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
-        ConversationList.ItemsSource = scope switch
+        var filtered = scope switch
         {
-            "Isolated" => Entries.Where(static entry => string.IsNullOrWhiteSpace(entry.WorkingDirectory)).ToArray(),
-            "Workspace" => Entries.Where(static entry => !string.IsNullOrWhiteSpace(entry.WorkingDirectory)).ToArray(),
-            _ => Entries.ToArray()
+            "Isolated" => Entries.Where(static entry => string.IsNullOrWhiteSpace(entry.WorkingDirectory)),
+            "Workspace" => Entries.Where(static entry => !string.IsNullOrWhiteSpace(entry.WorkingDirectory)),
+            _ => Entries.AsEnumerable()
         };
+        ConversationList.ItemsSource = SortConversations(filtered);
 
         // 变更集 146：等布局完成后恢复上次的滚动位置（此刻可滚动范围才有效）
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
