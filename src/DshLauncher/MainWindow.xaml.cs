@@ -108,6 +108,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly HashSet<string> _dangerConfigWarned = new(StringComparer.Ordinal);
     private readonly StartupEvidenceStore _startupEvidence;
     private readonly InstanceIdleTracker _idleTracker = new();
+
+    /// <summary>
+    /// 因「有到点的定时提醒」而跳过了空闲自动停止的实例（变更集 176）：
+    /// 只用来把日志压成“每实例一条”，与保护逻辑无关。
+    /// </summary>
+    private readonly HashSet<string> _idleStopSkippedBySchedules = new(StringComparer.Ordinal);
     private readonly CrashRecoveryService _crashRecovery;
     private readonly PluginBisectService _pluginBisect;
     private readonly Dictionary<string, CancellationTokenSource> _crashRestartTokens = new(StringComparer.Ordinal);
@@ -757,6 +763,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 continue;
             }
 
+            // 防呆（变更集 176，docs/UPSTREAM-INTEGRATION-PLAN.md §A）：
+            // 实例还有到点的定时提醒时**不做空闲自动停止** —— 否则会把用户设好的提醒静默掉。
+            // 读不懂（未知）不拦，避免因为一个只读诊断把正常的空闲回收弄停。
+            var idleSnapshot = ScheduleSnapshotService.Read(instance.DshHome);
+            if (idleSnapshot.HasActive)
+            {
+                if (_idleStopSkippedBySchedules.Add(instance.Id))
+                {
+                    LauncherLog.Info(
+                        $"实例 {instance.Name} 已空闲，但有 {idleSnapshot.ActiveCount} 个待执行定时提醒，本次不自动停止。",
+                        ErrorCodes.E1019,
+                        new { instance = instance.Id, reminders = idleSnapshot.ActiveCount });
+                }
+
+                continue;
+            }
+
+            _idleStopSkippedBySchedules.Remove(instance.Id);
             _ = StopIdleInstanceAsync(instance, threshold);
         }
     }
@@ -6307,7 +6331,77 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return;
         }
 
+        // 防呆（变更集 176）：主动停止前，先把「还有待执行提醒」讲清楚。
+        if (!ConfirmStopWithPendingSchedules(SelectedInstance))
+        {
+            return;
+        }
+
         await StopInstanceAsync(SelectedInstance);
+    }
+
+    /// <summary>
+    /// 停止前防呆（变更集 176，docs/UPSTREAM-INTEGRATION-PLAN.md §A）：实例还有到点的定时提醒时先问一句。
+    /// 只用在**用户主动停止**的入口；空闲自动停止走「直接跳过」，重启/安全模式这类马上又拉起的内部停止不打扰。
+    /// 读取失败/看不懂一律放行（只读诊断不得阻拦实例操作）。
+    /// </summary>
+    private bool ConfirmStopWithPendingSchedules(ManagerInstance instance)
+    {
+        var snapshot = ScheduleSnapshotService.Read(instance.DshHome);
+        if (snapshot.UnreadableCount > 0)
+        {
+            LauncherLog.Warn(
+                "定时提醒里有无法解析的记录，已按「未知」处理（不影响停止/切换）。",
+                ErrorCodes.E1019,
+                new { instance = instance.Id, unreadable = snapshot.UnreadableCount });
+        }
+
+        if (!snapshot.HasActive)
+        {
+            return true;
+        }
+
+        var titles = string.Join("、", snapshot.ActiveTitles.Take(3));
+        var more = snapshot.ActiveTitles.Count > 3 ? $"（等 {snapshot.ActiveTitles.Count} 个）" : string.Empty;
+        var next = snapshot.NextDueUtc is { } due
+            ? $"\n最近一次：{due.ToLocalTime():yyyy-MM-dd HH:mm}（本地时间）。"
+            : string.Empty;
+        var message = $"{instance.Name} 有 {snapshot.ActiveCount} 个待执行的定时提醒：{titles}{more}。{next}"
+            + "\n\n停止实例后，实例重新运行前这些提醒都不会触发。确定要停止吗？";
+        return AppDialog.Show(
+            this,
+            DialogText.ForMessageBox(message),
+            "停止实例",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+    }
+
+    /// <summary>退出确认用：把「还有待执行提醒」的实例汇总成一句话（没有则返回空串）。</summary>
+    private static string DescribePendingSchedules(IReadOnlyList<ManagerInstance> instances)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var homes = 0;
+        var reminders = 0;
+        foreach (var instance in instances)
+        {
+            if (!seen.Add(instance.DshHome ?? string.Empty))
+            {
+                continue;
+            }
+
+            var snapshot = ScheduleSnapshotService.Read(instance.DshHome);
+            if (!snapshot.HasActive)
+            {
+                continue;
+            }
+
+            homes++;
+            reminders += snapshot.ActiveCount;
+        }
+
+        return homes == 0
+            ? string.Empty
+            : $"\n其中 {homes} 个实例还有 {reminders} 个定时提醒待执行，退出期间不会触发。";
     }
 
     private async Task StopInstanceAsync(ManagerInstance selected, string? notice = null)
@@ -7218,6 +7312,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 var more = runningForClose.Length > 5 ? $"（等 {runningForClose.Length} 个）" : string.Empty;
                 var message = $"{runningForClose.Length} 个实例正在运行：{names}{more}。"
                     + "\n退出启动器会先停止这些实例，未保存的会话内容可能中断。"
+                    + DescribePendingSchedules(runningForClose)
                     + "\n\n确定要退出吗？";
                 confirmed = AppDialog.Show(
                     this,
@@ -7326,6 +7421,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         SelectedInstance = instance;
+        if (!ConfirmStopWithPendingSchedules(instance))
+        {
+            return;
+        }
+
         _ = StopInstanceAsync(instance);
     }
 

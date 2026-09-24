@@ -731,6 +731,18 @@
                                                                 <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                                                 <TextBlock Text="{Binding DshVersionText}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" />
                                                                 <TextBlock Text="{Binding ResourceSummaryText}" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                                                                <!-- 定时提醒（变更集 176）：空串时整行收起来，不占高度 -->
+                                                                <TextBlock Text="{Binding ScheduleSummaryText}" Foreground="{StaticResource MutedBrush}" FontSize="11">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding ScheduleSummaryText}" Value="">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
                                                                 <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource BlueBrush}" FontSize="11" />
                                                             </StackPanel>
                                                         </Grid>

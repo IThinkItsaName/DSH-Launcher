@@ -36,6 +36,8 @@
 
 ### A. 定时任务 → 关闭防呆 + 相关只读展示（P0，**不依赖 §0.2**）
 
+> **状态：已在变更集 176 落地**（work-log/200）——A1 `ScheduleSnapshotService`、A2 防呆接线（停止前确认 / 空闲自动停跳过 / 退出确认与换版本报告加一句）、A3 卡片只读行已完成；验证：构建 0/0、SelfTest 212/0、harness **398 PASS / 0 FAIL / 0 SKIP**（+2 门禁 + C20 哨兵）。下面保留原计划文字，并标出落地时被事实纠正的一处（A3②）。
+
 **上游事实（已核）**
 
 - `web` profile **默认挂载** Schedule（`packages/bundle/web-app/cordis.patch.yml` 插入 `time-context` + `schedule`，`ui-schedule` 保持启用）⇒ 启动器起的每个实例都有定时任务与 `schedule_create/list/update/delete` 工具，并有自动化任务页 / 页头提醒时钟 / 侧栏标记。
@@ -52,7 +54,7 @@
 |---|---|---|
 | A1 | 新增只读 `ScheduleSnapshotService`：解析某实例 `DshHome` 下 `storages/schedule/tasks/*.json` → `{ activeCount, nextAtUtc, titles[] }`；**失败静默降级**（目录不存在 / JSON 坏 / `version ≠ 1` → 返回"未知"，绝不让解析问题影响实例操作） | `Services/`（新文件）+ `Models/` |
 | A2 | 防呆接线（"关闭防呆"这一族）：手动停止（`MainWindow.StopInstanceAsync:6313` 及其余停止入口 1747/6262/6350/6419/6759）、**空闲自动停**（`MainWindow:748` 一带）、换版本（`InstanceVersionSwitchService`）、关启动器 —— 有 active 任务时：手动停给一次确认；**空闲自动停直接跳过并记录原因**；换版本/退出给提示（文案与官方桌面端的两种事实口径对齐） | `MainWindow.xaml.cs`、`InstanceIdleTracker` 调用点、`InstanceVersionSwitchService` |
-| A3 | 相关内容：① 实例卡片/详情**只读**显示"待执行 N · 下次 <本地时间>"；② `DshHomeImportService`（导入既有 DSH_HOME）**纳入 `storages/schedule/**`** —— 现在它显式列举 `sessions/`、`storages/workspace.json`、`profiles/web/**`（`DshHomeImportService.cs:170/172/376/496`），**不含 schedule** ⇒ 导入会丢提醒 | 卡片渲染处 + `DshHomeImportService` |
+| A3 | 相关内容：① 实例卡片**只读**显示「提醒 N · 下次 …」（启动页 + 版本控制页两处卡片，空则不占行）——**已做**；② **〔原计划有误，已改〕** 曾以为 `DshHomeImportService` 不含 `storages/schedule` ⇒ “导入会丢提醒”。落地时通读 `CopyMissingDirectory` 后确认：它**拷贝除 `.dsh-launcher` / `.credentials.yaml` / `webview2` / `node_modules` / `storages/workspace.json` 之外的全部 missing 内容**（`Services/DshHomeImportService.cs:342-380`），而 170/172/376 那几处只是**特例合并**（sessions / workspace / 凭据）⇒ `storages/schedule/**` 本来就会被带过去，**无需改动** | 卡片渲染处（已完成）；导入服务**不动** |
 
 **不做**：新建/编辑/删除提醒（dsh 自己的 UI 负责）；**不写** `schedule` 存储（避免跟随上游 domain 版本演进而做迁移）；`VersionSnapshotService` **不动**（它只覆盖配置文件——`settings.yaml`/`.credentials.yaml`/profile 清单与锁/`launcher.patch.yml`，与 `sessions/` 同级语义，加 `storages/` 会改变快照语义与上限）。
 
@@ -119,7 +121,7 @@
 | W3 | `dsh plugin` 现在会往 stderr 打兼容警告与放行提示 | 核 `ExtensionService` 的判成败不会把警告当失败（当前只按退出码） |
 | W4 | 启动时报告被跳过的 bundle（`reportSkippedBundles`） | 可接进日志归因（低优先） |
 | W5 | `web` 每个会话多 4 个工具 schema + 每步一条 `time-context` 持久 user 消息 | 用户可感知的 token 成本；被问到要能解释 |
-| W6 | 每个实例的 DSH_HOME 多出 `storages/schedule/**` | 见 A3（导入纳入；快照按设计不含） |
+| W6 | 每个实例的 DSH_HOME 多出 `storages/schedule/**` | 导入会自然带过去（见 A3②，无需改）；换版本快照按设计只含配置（不含 `sessions/`、`storages/`） |
 
 ---
 

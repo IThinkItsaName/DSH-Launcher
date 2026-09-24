@@ -26,6 +26,7 @@ public static class ErrorCodes
     public const string E1016 = "E1016"; // 崩溃恢复（自动重启/冷却关闭/现场记录）
     public const string E1017 = "E1017"; // 逐插件定位（二分禁用试验）
     public const string E1018 = "E1018"; // 实例路径按当前数据根重定位（便携数据根）
+    public const string E1019 = "E1019"; // 定时提醒只读快照（读不懂/因待执行提醒跳过空闲自动停止）
 
     // E2xxx 插件 / 扩展
     public const string E2001 = "E2001"; // 插件依赖自检发现异常

@@ -14,7 +14,7 @@
 > - 哨兵实现在 `_verify-p0/Program.cs` 的「契约哨兵」段，命名前缀 `contract:`。
 > - 已安装运行时的定位**不再写死版本号**（2026-09-15，work-log/156）：探针遍历 `versions/` 按版本降序取包根，
 >   并先跑 `contract: 已安装运行时包根可解析（C1/C2/C6 探针前置）`；该前置 FAIL 时先修路径/重装，不要当作契约破坏。
-> - 最近核对：上游 `00102833`（2026-09-22，`dsh-v0.1.7-alpha.2`）、安装运行时 `0.1.7-rc.1`（2026-09-24 核对；上一次记录 0.1.5-rc.2 已过时）。
+> - 最近核对：上游 `477b4f42`（2026-09-24，`dsh-v0.1.7-rc.2`；本区间新增 **C20**）、安装运行时 `0.1.7-rc.1`（2026-09-24 核对；上一次记录 0.1.5-rc.2 已过时）。
 > - 编号 **C18** 为历史保留号（对应能力已并入 C13/C17），表中不单列。
 
 ## 一、契约表
@@ -41,6 +41,8 @@
 | **C17** | 凭据文件名 `.credentials.yaml`（含 `.yml` 变体）与"只报元数据、不回显值"策略 | C13 的固定文件名 + 本仓安全契约（work-log/73） | `CredentialAuditService`、`DangerousConfigAuditService`（凭据可写检查） | 清单为空 → 看起来"本机没有凭据文件" | 由 SelfTest 断言覆盖（凭据文件清单 + 4 组安全反证；未单独设 harness 哨兵） |
 
 | **C19** | 社区探针审计文件格式：`<DSH_HOME>/audit/<DSH_AUDIT_PROFILE\|session>.jsonl`，每行 `{t,sid,seq,type,actor,h[,flags,sev,key,raw]}`（`@marcog-h/dsh-audit` 0.1.5，MIT，第三方可选） | 探针源码 `lib/index.js`（`_repro/probe-audit/` 留有 tarball 备查） | `AuditProbeTimelineService`（#20 增量 3） | 字段改名 → 时间轴少字段或空态；**因我们只读白名单字段，最坏是显示变少，不会崩** | 无 harness 哨兵（第三方可选数据源、非我方依赖；解析容错 + 字段白名单 + 反证 F/G 覆盖） |
+
+| **C20** | 定时提醒存储布局：`<DSH_HOME>/storages/schedule/tasks/<ScheduleId>.json`（`storage-json` per-record 单元：单元目录 `<root>/<domain.name>/`、每 table 一个子目录、逐记录一文件、外层 stamp `{version,record}`）；域 `name: 'schedule', version: 1`；记录 `{sessionId, record:{kind,title,scheduledAt,…}, status:'active'\|'inactive'}`（缺 `status` ⇒ active）。**启动器只读、不写** | 上游 `packages/schedule/schedule/src/storage.ts`（域与表）+ `packages/storage/storage-json/src/per-record-unit.ts`（布局）+ `packages/bundle/base/cordis.patch.yml`（`dshHomePath('storages')`）；`web` profile 自 0.1.7-rc.1 起默认挂载 Schedule | `ScheduleSnapshotService`（**变更集 176**）、`MainWindow.EvaluateIdleAutoStop` / `ConfirmStopWithPendingSchedules`、`ManagerInstance.ScheduleSummaryText` | **温和**：读不懂就降级为「未知」（不提示、不拦操作；也绝不因此让实例操作失败）。最坏情况是提醒提醒不到（防呆漏报）或卡片少显示一行 | `contract: 定时提醒存储布局与域版本未变（C20）`（源码级，读本地上游克隆） |
 
 ## 二、降级方向（0.1.5 → 0.1.2）为什么是单向的
 

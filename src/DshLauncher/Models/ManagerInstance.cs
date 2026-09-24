@@ -91,6 +91,14 @@ public sealed record ManagerInstance(
     [JsonIgnore]
     public string ResourceSummaryText => $"{ReadPluginCount()} Plugins · {ReadSkillCount()} Skills";
 
+    /// <summary>
+    /// 实例卡片上的定时提醒摘要（变更集 176）：空串 = 不显示（没有提醒、或读不到）。
+    /// 与 <see cref="ResourceSummaryText"/> 同口径（按绑定求值、读不到就退让），
+    /// 数据来源见 <see cref="ScheduleSnapshotService"/>。
+    /// </summary>
+    [JsonIgnore]
+    public string ScheduleSummaryText => Services.ScheduleSnapshotService.Read(DshHome).SummaryText;
+
     [JsonIgnore]
     public DateTimeOffset RecentSortAt => LastUsedAt ?? RegisteredAt;
 

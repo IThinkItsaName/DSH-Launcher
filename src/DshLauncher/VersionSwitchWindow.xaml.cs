@@ -211,7 +211,7 @@ public partial class VersionSwitchWindow : Window
                 progress: progress,
                 cancellationToken: _cancellation.Token);
             _precheck = _switchService.Precheck(_instance, _target, node);
-            ReportText.Text = BuildReport(_precheck, _target);
+            ReportText.Text = BuildReport(_precheck, _target, ScheduleSnapshotService.Read(_instance.DshHome));
             SessionBackupBox.Visibility = _precheck.RequiresSessionBackup ? Visibility.Visible : Visibility.Collapsed;
             SessionBackupBox.IsChecked = _precheck.RequiresSessionBackup;
             SwitchButton.IsEnabled = _precheck.CanProceed;
@@ -391,7 +391,10 @@ public partial class VersionSwitchWindow : Window
         }
     }
 
-    private static string BuildReport(InstanceVersionSwitchPrecheck precheck, InstanceVersionTargetResolution target)
+    private static string BuildReport(
+        InstanceVersionSwitchPrecheck precheck,
+        InstanceVersionTargetResolution target,
+        ScheduleSnapshot schedule)
     {
         var lines = new List<string>
         {
@@ -413,6 +416,18 @@ public partial class VersionSwitchWindow : Window
 
         lines.Add($"新格式会话（session.vN）：{precheck.VersionedSessionCount} 个"
             + $" · 目标版本可读：{(precheck.TargetReadsVersionedSessions ? "是（读取时自动迁移）" : "否")}");
+
+        // 定时提醒（变更集 176）：换版本会重启实例，实例停着的时候提醒不会触发。
+        if (schedule.HasActive)
+        {
+            lines.Add($"定时提醒：{schedule.ActiveCount} 个待执行"
+                + (schedule.NextDueUtc is { } due ? $" · 最近 {due.ToLocalTime():yyyy-MM-dd HH:mm}（本地时间）" : string.Empty)
+                + " · 切换期间实例会重启，这段时间不会触发");
+        }
+        else if (!schedule.Known)
+        {
+            lines.Add("定时提醒：读取失败，已按「未知」处理（不影响本次切换）");
+        }
 
         if (precheck.Warnings.Count > 0)
         {
