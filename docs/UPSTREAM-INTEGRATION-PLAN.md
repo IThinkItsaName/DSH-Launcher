@@ -36,12 +36,12 @@
 
 ### A. 定时任务 → 关闭防呆 + 相关只读展示（P0，**不依赖 §0.2**）
 
-> **状态：已在变更集 176 落地**（work-log/200）——A1 `ScheduleSnapshotService`、A2 防呆接线（停止前确认 / 空闲自动停跳过 / 退出确认与换版本报告加一句）、A3 卡片只读行已完成；验证：构建 0/0、SelfTest 212/0、harness **398 PASS / 0 FAIL / 0 SKIP**（+2 门禁 + C20 哨兵）。下面保留原计划文字，并标出落地时被事实纠正的一处（A3②）。
+> **状态：已在变更集 176 落地，并在变更集 178 修掉布局误判**（work-log/200、[202](../work-log/202-schedule-single-layout.md)）——A1 `ScheduleSnapshotService`、A2 防呆接线（停止前确认 / 空闲自动停跳过 / 退出确认与换版本报告加一句）、A3 卡片只读行已完成；**178 修正**：提醒实际是 `<DSH_HOME>/storages/schedule.json`（**single** 布局，不是 per-record）——176 读错路径 ⇒ 实际读不到任何提醒，现已按真实形状修好并加了改口径后的 C20 哨兵。验证：构建 0/0、SelfTest **215/0**、harness **400 PASS / 0 FAIL / 0 SKIP**。下面保留原计划文字，并标出落地时被事实纠正的两处（A 的存储路径、A3②）。
 
 **上游事实（已核）**
 
 - `web` profile **默认挂载** Schedule（`packages/bundle/web-app/cordis.patch.yml` 插入 `time-context` + `schedule`，`ui-schedule` 保持启用）⇒ 启动器起的每个实例都有定时任务与 `schedule_create/list/update/delete` 工具，并有自动化任务页 / 页头提醒时钟 / 侧栏标记。
-- 权威存储：`<DSH_HOME>/storages/schedule/tasks/<ScheduleId>.json`。推导链：`storage-json` 的 `root` = `dshHomePath('storages')`（`packages/bundle/base/cordis.patch.yml:171`）→ per-record 单元目录 `<root>/<domain.name>/` → 每个 table 一个子目录 `<key>.json`（`packages/storage/storage-json/src/per-record-unit.ts`）。本机实测同型布局：`…/dsh-home/storages/session_projcache/sessions/session-*.json`、`…/storages/workspace.json`。
+- **〔178 纠正〕权威存储：`<DSH_HOME>/storages/schedule.json`（单个文件，`storage-json` 的 single 布局）**：形状 `{"unit":{"name":"schedule","version":1},"global":null,"tables":{"tasks":{"<ScheduleId>":{sessionId,record:{kind,title,scheduledAt,…},status,…}}}}`。推导链：`storage-json` 的 `root` = `dshHomePath('storages')`（`packages/bundle/base/cordis.patch.yml:171`）→ 按域声明的 `layout` 选单元，**默认 single**（`single-unit.ts` 写 `<root>/<name>.json`），只有显式 `layout: 'per-record'` 才写 `<root>/<name>/<table>/<key>.json`（`index.ts`）；**schedule 域没有声明 per-record** ⇒ 落到 `storages/schedule.json`，并已用真实文件核对。~~原计划写的 `<...>/storages/schedule/tasks/<ScheduleId>.json`（per-record）是错的：那条推导把 `session_projcache`（**声明了** per-record）的形状当成了所有域的默认。~~
 - 记录形状（`packages/schedule/schedule/src/storage.ts` + `types.ts`）：
   `{ sessionId, record: { id, kind: 'after'|'at'|'every'|'daily'|'weekly'|'cron', title(≤120), prompt, scheduledAt(四位年 RFC3339 UTC = **下一次或最终触发点**), afterSeconds?, everySeconds?, time?, timeZone?, weekdays? }, status: 'active'|'inactive', lastDelivery?, deliveryHistory? }`；domain `name: 'schedule', version: 1`。
 - **只有宿主在跑才会投递**：官方桌面端为此专门弹退出确认（"应用关闭期间定时任务不会运行"）。

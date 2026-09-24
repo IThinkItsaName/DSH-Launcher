@@ -2810,113 +2810,148 @@ using (var catalogHandler = MarketplaceService.CreateHttpHandler())
 }
 
 // ---------------------------------------------------------------------------
-// 定时提醒只读快照（变更集 176，docs/UPSTREAM-INTEGRATION-PLAN.md §A）
-// 上游 0.1.7-rc.1 起 web profile 默认挂载 Schedule，数据落在
-// <DSH_HOME>/storages/schedule/tasks/<id>.json（storage-json 的 per-record 单元）。
-// 契约：只读、看不懂就降级为“未知”，绝不抛异常。
+// 定时提醒只读快照（变更集 176；落盘布局在变更集 178 按真实文件修正）
+//   * 真实（默认 single 布局）：<DSH_HOME>/storages/schedule.json
+//       {"unit":{"name":"schedule","version":1},"global":null,"tables":{"tasks":{"<id>":{…}}}}
+//   * per-record 布局（<DSH_HOME>/storages/schedule/tasks/<id>.json，外层 {version,record}）
+//     只作防御性兼容：schedule 域当前不声明 per-record（哨兵 C20 盯着）。
+// 契约：只读、看不懂就降级为「未知」，绝不抛异常、绝不阻拦实例操作。
 // ---------------------------------------------------------------------------
 {
-    var scheduleHome = Path.Combine(scratch, "schedule-snapshot");
-    var tasksDirectory = Path.Combine(scheduleHome, "storages", "schedule", "tasks");
-    Directory.CreateDirectory(tasksDirectory);
-
-    static string TaskFile(string id, string? status, string title, string? scheduledAt, int version = 1)
+    // tasks 表里的一条值（也是 per-record 布局 record 里的那个对象）
+    static string TaskJson(string id, string? status, string title, string? due)
     {
-        // status = null ⇒ 整条省略 status 字段（上游 schema 默认 active）。
         var statusText = status is null ? string.Empty : $",\"status\":\"{status}\"";
-        var dueText = scheduledAt is null ? string.Empty : $",\"scheduledAt\":\"{scheduledAt}\"";
-        return $"{{\"version\":{version},\"record\":{{\"sessionId\":\"sess-{id}\",\"record\":{{\"id\":\"{id}\",\"kind\":\"at\",\"title\":\"{title}\"{dueText}}}{statusText}}}}}";
+        var dueText = due is null ? string.Empty : $",\"scheduledAt\":\"{due}\"";
+        return $"{{\"sessionId\":\"sess-{id}\",\"record\":{{\"id\":\"{id}\",\"kind\":\"at\",\"title\":\"{title}\"{dueText}}}{statusText}}}";
     }
 
-    // ① 无目录 = 确认没有提醒（不是“未知”）。
-    Check(
-        "schedule-snapshot/没有提醒目录时判定为「确认无提醒」而不是未知",
-        ScheduleSnapshotService.Read(Path.Combine(scratch, "schedule-empty")) is { Known: true, ActiveCount: 0 },
-        ScheduleSnapshotService.Read(Path.Combine(scratch, "schedule-empty")).Known.ToString());
+    static string UnitJson(int version, params string[] taskValues)
+    {
+        var tasks = string.Join(",", taskValues.Select((value, index) => $"\"schedule-{index}\":{value}"));
+        return $"{{\"unit\":{{\"name\":\"schedule\",\"version\":{version}}},\"global\":null,\"tables\":{{\"tasks\":{{{tasks}}}}}}}";
+    }
 
-    // ② DSH_HOME 缺失 = 未知（不谎称“没有提醒”）。
+    // ① 没有任何提醒文件 = 确认「没有提醒」（而不是未知）
+    Check(
+        "schedule-snapshot/没有提醒文件时判定为「确认无提醒」而不是未知",
+        ScheduleSnapshotService.Read(Path.Combine(scratch, "schedule-empty")) is { Known: true, ActiveCount: 0 });
+
+    // ② 连 DSH_HOME 都没有 = 未知（不谎称“没有提醒”）
     Check(
         "schedule-snapshot/拿不到 DSH_HOME 时返回未知",
         ScheduleSnapshotService.Read(null) == ScheduleSnapshot.Unknown
-        && ScheduleSnapshotService.Read("  ") == ScheduleSnapshot.Unknown,
-        ScheduleSnapshotService.Read(null).Known.ToString());
+        && ScheduleSnapshotService.Read("  ") == ScheduleSnapshot.Unknown);
 
-    // ③ 正常：两条 active（其中一条缺 status，按上游语义算 active）+ 一条 inactive；下次触发取最早。
+    // ③ 真实布局（single，storages/schedule.json）：2 条 active（其中一条缺 status）+ 1 条 inactive
+    var singleHome = Path.Combine(scratch, "schedule-single");
+    var singleStorages = Path.Combine(singleHome, "storages");
+    Directory.CreateDirectory(singleStorages);
+    var singleUnitPath = Path.Combine(singleStorages, "schedule.json");
     File.WriteAllText(
-        Path.Combine(tasksDirectory, "later.json"),
-        TaskFile("later", null, "晚一点的提醒", "2026-09-25T10:00:00.000Z"));
-    File.WriteAllText(
-        Path.Combine(tasksDirectory, "sooner.json"),
-        TaskFile("sooner", "active", "最近的提醒", "2026-09-25T01:30:00.000Z"));
-    File.WriteAllText(
-        Path.Combine(tasksDirectory, "off.json"),
-        TaskFile("off", "inactive", "已停用的提醒", "2026-09-24T23:00:00.000Z"));
-    var snapshot = ScheduleSnapshotService.Read(scheduleHome);
+        singleUnitPath,
+        UnitJson(
+            1,
+            TaskJson("later", null, "晚一点的提醒", "2026-09-25T10:00:00.000Z"),
+            TaskJson("sooner", "active", "最近的提醒", "2026-09-25T01:30:00.000Z"),
+            TaskJson("off", "inactive", "已停用的提醒", "2026-09-24T23:00:00.000Z")));
+    var singleSnapshot = ScheduleSnapshotService.Read(singleHome);
     Check(
-        "schedule-snapshot/统计 active/inactive 并取最近的触发时刻（缺 status 算 active）",
-        snapshot is { Known: true, ActiveCount: 2, TotalCount: 3, UnreadableCount: 0 }
-        && snapshot.NextDueUtc == DateTimeOffset.Parse("2026-09-25T01:30:00.000Z", System.Globalization.CultureInfo.InvariantCulture)
-        && snapshot.ActiveTitles.Count == 2
-        && snapshot.ActiveTitles[0] == "最近的提醒"
-        && snapshot.ActiveTitles[1] == "晚一点的提醒",
-        $"active={snapshot.ActiveCount} total={snapshot.TotalCount} next={snapshot.NextDueUtc:O} titles={string.Join(",", snapshot.ActiveTitles)}");
+        "schedule-snapshot/读真实 single 布局，统计 active/inactive 并取最近的触发时刻（缺 status 算 active）",
+        singleSnapshot is { Known: true, ActiveCount: 2, TotalCount: 3, UnreadableCount: 0 }
+        && singleSnapshot.NextDueUtc == DateTimeOffset.Parse("2026-09-25T01:30:00.000Z", System.Globalization.CultureInfo.InvariantCulture)
+        && singleSnapshot.ActiveTitles.Count == 2
+        && singleSnapshot.ActiveTitles[0] == "最近的提醒"
+        && singleSnapshot.ActiveTitles[1] == "晚一点的提醒",
+        $"active={singleSnapshot.ActiveCount} total={singleSnapshot.TotalCount} next={singleSnapshot.NextDueUtc:O} titles={string.Join(",", singleSnapshot.ActiveTitles)}");
     Check(
         "schedule-snapshot/摘要文案带条数与本地时间",
-        snapshot.HasActive && snapshot.SummaryText.StartsWith("提醒 2 · 下次 ", StringComparison.Ordinal),
-        snapshot.SummaryText);
+        singleSnapshot.HasActive && singleSnapshot.SummaryText.StartsWith("提醒 2 · 下次 ", StringComparison.Ordinal),
+        singleSnapshot.SummaryText);
 
-    // ④ 域版本不符 = 看不懂（不是“没有提醒”）。
-    var versionDirectory = Path.Combine(scratch, "schedule-version");
-    var versionTasks = Path.Combine(versionDirectory, "storages", "schedule", "tasks");
-    Directory.CreateDirectory(versionTasks);
+    // ④ 域版本不符 ⇒ 看不懂（不是“没有提醒”）
+    var versionHome = Path.Combine(scratch, "schedule-version");
+    Directory.CreateDirectory(Path.Combine(versionHome, "storages"));
     File.WriteAllText(
-        Path.Combine(versionTasks, "future.json"),
-        TaskFile("future", "active", "未来版本", "2026-09-25T01:30:00.000Z", version: 2));
-    var futureSnapshot = ScheduleSnapshotService.Read(versionDirectory);
+        Path.Combine(versionHome, "storages", "schedule.json"),
+        UnitJson(2, TaskJson("future", "active", "未来版本", "2026-09-25T01:30:00.000Z")));
+    var futureSnapshot = ScheduleSnapshotService.Read(versionHome);
     Check(
         "schedule-snapshot/域版本不是 1 时判为未知（不误报为「没有提醒」）",
-        futureSnapshot is { Known: false, UnreadableCount: 1 } && !futureSnapshot.HasActive,
-        $"known={futureSnapshot.Known} unreadable={futureSnapshot.UnreadableCount}");
+        futureSnapshot is { Known: false, UnreadableCount: 0 } && !futureSnapshot.HasActive,
+        $"known={futureSnapshot.Known} active={futureSnapshot.ActiveCount}");
 
-    // ⑤ 坏 JSON / 缺 record / 非法 status：一律算读不懂，且绝不抛异常。
-    var brokenDirectory = Path.Combine(scratch, "schedule-broken");
-    var brokenTasks = Path.Combine(brokenDirectory, "storages", "schedule", "tasks");
-    Directory.CreateDirectory(brokenTasks);
-    File.WriteAllText(Path.Combine(brokenTasks, "bad-json.json"), "{ not json");
-    File.WriteAllText(Path.Combine(brokenTasks, "no-record.json"), "{\"version\":1}");
+    // ⑤ 空表 / 缺 tables / 坏 JSON：空表 = 确认没有提醒；其余 = 未知
+    var emptyTableHome = Path.Combine(scratch, "schedule-empty-table");
+    Directory.CreateDirectory(Path.Combine(emptyTableHome, "storages"));
     File.WriteAllText(
-        Path.Combine(brokenTasks, "bad-status.json"),
-        TaskFile("bad-status", "paused", "非法状态", "2026-09-25T01:30:00.000Z"));
-    var brokenSnapshot = ScheduleSnapshotService.Read(brokenDirectory);
+        Path.Combine(emptyTableHome, "storages", "schedule.json"),
+        "{\"unit\":{\"name\":\"schedule\",\"version\":1},\"tables\":{}}");
     Check(
-        "schedule-snapshot/坏 JSON、缺 record、非法 status 都算读不懂且不抛异常",
-        brokenSnapshot is { Known: false, UnreadableCount: 3, ActiveCount: 0 },
-        $"known={brokenSnapshot.Known} unreadable={brokenSnapshot.UnreadableCount} active={brokenSnapshot.ActiveCount}");
+        "schedule-snapshot/single 单元里没有 tasks 表时算「没有提醒」",
+        ScheduleSnapshotService.Read(emptyTableHome) is { Known: true, ActiveCount: 0 });
 
-    // ⑥ 可解析与不可解析混在一起：仍然报出可确认的条数，但整体标注为“未知”。
-    File.WriteAllText(
-        Path.Combine(brokenTasks, "good.json"),
-        TaskFile("good", "active", "能读的提醒", "2026-09-25T02:00:00.000Z"));
-    var mixedSnapshot = ScheduleSnapshotService.Read(brokenDirectory);
+    var brokenHome = Path.Combine(scratch, "schedule-broken");
+    Directory.CreateDirectory(Path.Combine(brokenHome, "storages"));
+    File.WriteAllText(Path.Combine(brokenHome, "storages", "schedule.json"), "{ not json");
+    var brokenSnapshot = ScheduleSnapshotService.Read(brokenHome);
     Check(
-        "schedule-snapshot/部分读不懂时不谎报：整体未知但仍给出可解析条数",
-        mixedSnapshot is { Known: false, ActiveCount: 1, TotalCount: 1, UnreadableCount: 3 }
+        "schedule-snapshot/single 单元是坏 JSON 时不抛异常、按未知处理",
+        brokenSnapshot is { Known: false, ActiveCount: 0 } && brokenSnapshot == ScheduleSnapshot.Unknown,
+        $"known={brokenSnapshot.Known}");
+
+    // ⑥ 单条读不懂（非法 status / 缺 record）与可解析条混在一起：整体标未知但仍报可确认条数
+    var mixedHome = Path.Combine(scratch, "schedule-mixed");
+    Directory.CreateDirectory(Path.Combine(mixedHome, "storages"));
+    File.WriteAllText(
+        Path.Combine(mixedHome, "storages", "schedule.json"),
+        UnitJson(
+            1,
+            TaskJson("good", "active", "能读的提醒", "2026-09-25T02:00:00.000Z"),
+            TaskJson("bad-status", "paused", "非法状态", "2026-09-25T02:00:00.000Z"),
+            "{\"sessionId\":\"s\",\"status\":\"active\"}"));
+    var mixedSnapshot = ScheduleSnapshotService.Read(mixedHome);
+    Check(
+        "schedule-snapshot/部分读不懂时不谎报：整体未知、但仍给出可解析条数",
+        mixedSnapshot is { Known: false, ActiveCount: 1, TotalCount: 3, UnreadableCount: 2 }
         && !mixedSnapshot.HasActive,
-        $"known={mixedSnapshot.Known} active={mixedSnapshot.ActiveCount} unreadable={mixedSnapshot.UnreadableCount}");
+        $"known={mixedSnapshot.Known} active={mixedSnapshot.ActiveCount} total={mixedSnapshot.TotalCount} unreadable={mixedSnapshot.UnreadableCount}");
 
-    // ⑦ 缺触发时刻的 active 记录：仍算一条待执行，只是不参与“下次”。
-    var noDueDirectory = Path.Combine(scratch, "schedule-no-due");
-    var noDueTasks = Path.Combine(noDueDirectory, "storages", "schedule", "tasks");
-    Directory.CreateDirectory(noDueTasks);
+    // ⑦ 缺 scheduledAt 的 active 仍算待执行，只是没有“下次”
+    var noDueHome = Path.Combine(scratch, "schedule-no-due");
+    Directory.CreateDirectory(Path.Combine(noDueHome, "storages"));
     File.WriteAllText(
-        Path.Combine(noDueTasks, "no-due.json"),
-        TaskFile("no-due", "active", "没有时刻", null));
-    var noDueSnapshot = ScheduleSnapshotService.Read(noDueDirectory);
+        Path.Combine(noDueHome, "storages", "schedule.json"),
+        UnitJson(1, TaskJson("no-due", "active", "没有时刻", null)));
+    var noDueSnapshot = ScheduleSnapshotService.Read(noDueHome);
     Check(
         "schedule-snapshot/缺 scheduledAt 仍算待执行提醒（下次时刻留空）",
         noDueSnapshot is { Known: true, ActiveCount: 1 } && noDueSnapshot.NextDueUtc is null
         && noDueSnapshot.SummaryText == "提醒 1",
         $"active={noDueSnapshot.ActiveCount} next={noDueSnapshot.NextDueUtc?.ToString("O")} text={noDueSnapshot.SummaryText}");
+
+    // ⑧ 兼容路径：per-record 布局（<storages>/schedule/tasks/*.json，外层 {version,record}）
+    var perRecordHome = Path.Combine(scratch, "schedule-per-record");
+    var perRecordTasks = Path.Combine(perRecordHome, "storages", "schedule", "tasks");
+    Directory.CreateDirectory(perRecordTasks);
+    File.WriteAllText(
+        Path.Combine(perRecordTasks, "a.json"),
+        "{\"version\":1,\"record\":" + TaskJson("a", "active", "пер-record 提醒", "2026-09-25T03:00:00.000Z") + "}");
+    var perRecordSnapshot = ScheduleSnapshotService.Read(perRecordHome);
+    Check(
+        "schedule-snapshot/兼容 per-record 布局（上游若改布局也能读）",
+        perRecordSnapshot is { Known: true, ActiveCount: 1, TotalCount: 1 },
+        $"active={perRecordSnapshot.ActiveCount} known={perRecordSnapshot.Known}");
+
+    // ⑨ 两种布局同时存在时，以默认（single）为准
+    File.WriteAllText(
+        Path.Combine(perRecordHome, "storages", "schedule.json"),
+        UnitJson(1, TaskJson("s", "active", "single 提醒", "2026-09-25T04:00:00.000Z")));
+    var bothSnapshot = ScheduleSnapshotService.Read(perRecordHome);
+    Check(
+        "schedule-snapshot/single 与 per-record 同时存在时以 single（上游默认布局）为准",
+        bothSnapshot is { Known: true, ActiveCount: 1 } && bothSnapshot.ActiveTitles[0] == "single 提醒",
+        string.Join(",", bothSnapshot.ActiveTitles));
 }
 
 try
