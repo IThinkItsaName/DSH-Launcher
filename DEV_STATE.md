@@ -1,6 +1,8 @@
 # DSH Launcher 开发状态
 
 ## 当前目标
+> ⚠ **安装副本已于 2026-09-25 按用户决定删除**（改用官方桌面端，见 `../work-log/208-launcher-teardown.md`）：`D:\Program Files (x86)\dsh_launcher` 与第三方的 `D:\Program Files (x86)\DSH_launcher_2` 均已删除，**连同 `launcher-data`（实例/会话/凭据/定时提醒）与 `run_time` 运行时，无备份**。因此本文中所有“**已部署：安装副本 = …**”的描述都是**删除前的状态**；harness 的运行时前置随之缺失（现为 401 PASS / 1 FAIL / 4 SKIP，唯一 FAIL 是设计上 fail-fast 的「已安装运行时包根可解析」，非代码回归）。产品自测不受影响（241/0）。
+
 
 当前源码版本为 `v1.0.7`。本版让 Launcher 内打开的 DeepSeek Chat 在 Windows 任务栏中与 Launcher 独立分组；代码和回归测试已完成，尚未进行 Computer Use 实机观察。
 
