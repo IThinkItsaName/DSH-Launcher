@@ -108,6 +108,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private readonly HashSet<string> _dangerConfigWarned = new(StringComparer.Ordinal);
     private readonly StartupEvidenceStore _startupEvidence;
     private readonly InstanceIdleTracker _idleTracker = new();
+    private readonly InstanceHostFactsService _hostFacts = new();
+
+    /// <summary>已就“宿主报告有会话在跑”记过一次日志的实例（避免每 5 秒刷屏）。</summary>
+    private readonly HashSet<string> _hostBusyLogged = new(StringComparer.Ordinal);
+
+    /// <summary>已就“宿主事实不可用、本次回落启发式”记过一次日志的实例。</summary>
+    private readonly HashSet<string> _hostFactsFallbackLogged = new(StringComparer.Ordinal);
 
     /// <summary>
     /// 因「有到点的定时提醒」而跳过了空闲自动停止的实例（变更集 176）：
@@ -724,6 +731,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             || _isRuntimePrepareInProgress
             || _isNodeDetectionInProgress;
         var now = DateTimeOffset.UtcNow;
+        // 带 token 的实例地址（守护侧每轮探测写入）——宿主事实的调用凭据来源。每轮取一次快照，避免逐实例查。
+        var authenticatedUrls = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var tracked in _watchdog.Snapshot())
+        {
+            authenticatedUrls[tracked.InstanceId] = tracked.AuthenticatedWebUrl;
+        }
+
         foreach (var instance in Instances.ToArray())
         {
             if (!_instanceRunner.IsRunning(instance.Id)
@@ -751,15 +765,23 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             MarkInstanceActivityFromSignals(instance);
             var lastActivity = _idleTracker.GetLastActivity(instance.Id);
             var hasBackgroundTask = HasBackgroundTask(instance);
-            if (!InstanceIdleTracker.ShouldAutoStop(
-                    enabled: true,
-                    managed: true,
-                    launcherBusy,
-                    hasBackgroundTask,
-                    lastActivity,
-                    threshold,
-                    now))
+
+            // 宿主事实（变更集 182，计划 §C）：dsh 自己报的“有没有会话在跑”优先于连接/CPU 启发式。
+            // 拿不到（RPC 不可用/超时/旧运行时没有该接口）⇒ hostBusy = null ⇒ 回落启发式。
+            RefreshHostFactsIfDue(instance, authenticatedUrls.TryGetValue(instance.Id, out var url) ? url : null);
+            var hostBusy = _hostFacts.ResolveHostBusy(instance.Id, now);
+            var decision = InstanceIdleTracker.EvaluateAutoStop(
+                enabled: true,
+                managed: true,
+                launcherBusy,
+                hasBackgroundTask,
+                hostBusy,
+                lastActivity,
+                threshold,
+                now);
+            if (decision != AutoStopDecision.Stop)
             {
+                LogHostFactsDecision(instance, decision, hostBusy, now);
                 continue;
             }
 
@@ -781,7 +803,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
 
             _idleStopSkippedBySchedules.Remove(instance.Id);
-            _ = StopIdleInstanceAsync(instance, threshold);
+            _ = StopIdleInstanceAsync(instance, threshold, InstanceIdleTracker.DescribeBusySource(hostBusy));
         }
     }
 
@@ -827,16 +849,106 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task StopIdleInstanceAsync(ManagerInstance instance, TimeSpan threshold)
+    /// <summary>实例停了/删了：丢掉缓存的事实与 RPC 客户端，也清掉两个“只记一次”的标记。</summary>
+    private void ForgetHostFacts(string? instanceId)
+    {
+        _hostFacts.Forget(instanceId);
+        if (!string.IsNullOrWhiteSpace(instanceId))
+        {
+            _hostBusyLogged.Remove(instanceId);
+            _hostFactsFallbackLogged.Remove(instanceId);
+        }
+    }
+
+    /// <summary>
+    /// 宿主事实刷新（变更集 182）：到点就发一次 <c>session/list</c>（按实例节流，不阻塞 UI 线程）。
+    /// 刷新结果写入缓存，本轮判定与后续几轮直接用缓存；失败也会写成“不可用”并让判定回落启发式。
+    /// </summary>
+    private void RefreshHostFactsIfDue(ManagerInstance instance, string? authenticatedWebUrl)
+    {
+        // 原子占位：没到点或已有查询在飞 ⇒ 直接返回（不再写“查询中”占位——那会让日志把
+        // “正在查”当成“事实不可用”）。
+        if (!_hostFacts.TryBeginRefresh(instance.Id, DateTimeOffset.UtcNow))
+        {
+            return;
+        }
+
+        var instanceId = instance.Id;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _hostFacts.RefreshAsync(
+                    instanceId, authenticatedWebUrl, DateTimeOffset.UtcNow, _windowCancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // 窗口关闭：忽略。
+            }
+            catch (Exception ex)
+            {
+                // 客户端自身已经吞掉可预见失败；这里保证任何意外都不会把 UI 线程/进程带走。
+                _hostFacts.Store(instanceId, InstanceHostFacts.Unknown($"意外失败：{ex.GetType().Name}"), DateTimeOffset.UtcNow);
+            }
+            finally
+            {
+                _hostFacts.EndRefresh(instanceId);
+            }
+        }, _windowCancellation.Token);
+    }
+
+    /// <summary>
+    /// 把“为何不停”落成日志（变更集 182）：
+    /// ① 宿主报告有会话在跑 ⇒ 每个实例只记一次（同定时提醒防呆的做法）；
+    /// ② 宿主事实不可用且本次真的看了启发式 ⇒ 每个实例只记一次（Rediscovery 一次就够）。
+    /// </summary>
+    private void LogHostFactsDecision(
+        ManagerInstance instance,
+        AutoStopDecision decision,
+        bool? hostBusy,
+        DateTimeOffset now)
+    {
+        if (decision == AutoStopDecision.HostBusy)
+        {
+            var facts = _hostFacts.GetLast(instance.Id);
+            if (facts is { IsKnown: true } && _hostBusyLogged.Add(instance.Id))
+            {
+                LauncherLog.Info(
+                    $"实例 {instance.Name} 已空闲，但宿主报告还有 {facts.RunningCount} 个会话正在运行，本次不自动停止。",
+                    ErrorCodes.E1021,
+                    new { instance = instance.Id, running = facts.RunningCount, sessions = facts.SessionCount });
+            }
+
+            return;
+        }
+
+        if (hostBusy is null
+            && decision is AutoStopDecision.HeuristicBusy or AutoStopDecision.NotIdle
+            && _hostFacts.GetLast(instance.Id) is { IsKnown: false } unavailable
+            && _hostFactsFallbackLogged.Add(instance.Id))
+        {
+            LauncherLog.Info(
+                $"实例 {instance.Name} 的宿主事实不可用（{unavailable.Reason}），本次空闲判定回落到连接/CPU 启发式。",
+                ErrorCodes.E1020,
+                new { instance = instance.Id, reason = unavailable.Reason });
+        }
+    }
+
+    private async Task StopIdleInstanceAsync(ManagerInstance instance, TimeSpan threshold, string busySource)
     {
         var minutes = (int)Math.Round(threshold.TotalMinutes);
+        // 日志里也写明依据（变更集 182）：仅看 launcher.log 就能分清“事实说闲”与“启发式说闲”。
+        LauncherLog.Info(
+            $"实例 {instance.Name} 已空闲超过 {minutes} 分钟（{busySource}），执行空闲自动停止。",
+            code: null,
+            new { instance = instance.Id, minutes, busySource });
         await StopInstanceAsync(
             instance,
-            $"实例 {instance.Name} 已空闲超过 {minutes} 分钟，已自动停止；可在「实例设置 → 运行状况」关闭空闲自动停止。");
+            $"实例 {instance.Name} 已空闲超过 {minutes} 分钟（{busySource}），已自动停止；可在「实例设置 → 运行状况」关闭空闲自动停止。");
         _startupEvidence.Record(instance.Id, new StartupEvidence(
             BootLayer.Process,
             "空闲自动停止",
-            $"空闲超过 {minutes} 分钟"));
+            $"空闲超过 {minutes} 分钟；{busySource}"));
     }
 
     public bool CanRefreshNode => !_isNodeDetectionInProgress;
@@ -1423,6 +1535,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             "实例崩溃",
             $"exitCode={exitCode?.ToString() ?? "?"}；原因：{cause.Label}；{plan.Summary}"));
         _idleTracker.Forget(instance.Id);
+        ForgetHostFacts(instance.Id);
         OnPropertyChanged(nameof(SelectedInstanceCooldownVisibility));
 
         var exitText = exitCode is { } value ? $"（exitCode={value}）" : string.Empty;
@@ -6483,6 +6596,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             });
             ReportInstanceStoppedAsync(selected.Id);
             _idleTracker.Forget(selected.Id);
+            ForgetHostFacts(selected.Id);
             ShowNotice(notice ?? $"实例已停止：{selected.Name}。");
         }
         catch (OperationCanceledException) when (_windowCancellation.IsCancellationRequested)
@@ -8013,6 +8127,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     protected override void OnClosed(EventArgs e)
     {
         _browserGuard.Dispose();
+        _hostFacts.Dispose();
         _balanceCancellation?.Cancel();
         _balanceCancellation?.Dispose();
         _windowSource?.RemoveHook(WindowProcedure);

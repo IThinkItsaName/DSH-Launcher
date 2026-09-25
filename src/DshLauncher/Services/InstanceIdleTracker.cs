@@ -65,26 +65,94 @@ public sealed class InstanceIdleTracker
         GetLastActivity(instanceId) is not { } activity || now - activity.At >= threshold;
 
     /// <summary>
+    /// <summary>
     /// 是否应自动停止（纯函数，便于测试）：
     /// 开关未开、非 Launcher 托管、Launcher 自身在忙（安装/更新/准备运行环境等）、
-    /// 存在后台任务（外部连接）——任一命中都不停。
+    /// 宿主报告仍有会话在跑（<paramref name="hostBusy"/> = true）——任一命中都不停。
+    /// <para>
+    /// <b>宿主事实为主（变更集 182）</b>：<paramref name="hostBusy"/> 为 true/false 时以它为准；
+    /// 只有拿不到事实（null：RPC 不可用/超时/旧运行时没这个接口）时才看
+    /// <paramref name="hasBackgroundTask"/>（进程树有到外部地址的连接）这个启发式。
+    /// </para>
     /// </summary>
     public static bool ShouldAutoStop(
         bool enabled,
         bool managed,
         bool launcherBusy,
         bool hasBackgroundTask,
+        bool? hostBusy,
+        InstanceActivity? lastActivity,
+        TimeSpan threshold,
+        DateTimeOffset now) =>
+        EvaluateAutoStop(enabled, managed, launcherBusy, hasBackgroundTask, hostBusy, lastActivity, threshold, now)
+        == AutoStopDecision.Stop;
+
+    /// <summary>
+    /// 停止原因里那句"凭什么说它空闲"的白话（便于现场核对到底用的是宿主事实还是启发式）。
+    /// </summary>
+    public static string DescribeBusySource(bool? hostBusy) => hostBusy switch
+    {
+        true => "宿主报告仍有会话在跑",
+        false => "宿主报告无会话运行",
+        _ => "宿主事实不可用，按连接/CPU 启发式判定"
+    };
+
+    /// <summary>与 <see cref="ShouldAutoStop"/> 同一套判定，但把"为何不停"也返回来（日志/测试用）。</summary>
+    public static AutoStopDecision EvaluateAutoStop(
+        bool enabled,
+        bool managed,
+        bool launcherBusy,
+        bool hasBackgroundTask,
+        bool? hostBusy,
         InstanceActivity? lastActivity,
         TimeSpan threshold,
         DateTimeOffset now)
     {
-        if (!enabled || !managed || launcherBusy || hasBackgroundTask)
+        if (!enabled)
         {
-            return false;
+            return AutoStopDecision.Disabled;
         }
 
-        return lastActivity is null || now - lastActivity.At >= threshold;
+        if (!managed)
+        {
+            return AutoStopDecision.NotManaged;
+        }
+
+        if (launcherBusy)
+        {
+            return AutoStopDecision.LauncherBusy;
+        }
+
+        if (hostBusy == true)
+        {
+            return AutoStopDecision.HostBusy;
+        }
+
+        if (hostBusy is null && hasBackgroundTask)
+        {
+            return AutoStopDecision.HeuristicBusy;
+        }
+
+        var idle = lastActivity is null || now - lastActivity.At >= threshold;
+        return idle ? AutoStopDecision.Stop : AutoStopDecision.NotIdle;
     }
+}
+
+/// <summary>空闲自动停止的判定结果（Stop = 可以停；其余是"为何不停"）。</summary>
+public enum AutoStopDecision
+{
+    Stop,
+    Disabled,
+    NotManaged,
+    LauncherBusy,
+
+    /// <summary>宿主（dsh 自己）报告仍有会话在跑。</summary>
+    HostBusy,
+
+    /// <summary>拿不到宿主事实，且连接/CPU 启发式显示有外部活动。</summary>
+    HeuristicBusy,
+
+    NotIdle
 }
 
 /// <summary>数据文件活动探针：sessions/ 与 storages/ 下最近一次写入时间。</summary>

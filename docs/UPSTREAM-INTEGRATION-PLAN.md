@@ -90,15 +90,18 @@
 
 **风险**：写 `compatibility.json` 属对上游内部文件的写入 ⇒ 必须严格按上游校验语义（不可重写时拒绝），并配哨兵盯文件名与结构。
 
-### C. 忙闲判定接第一手事实（P1，**先做 §0.2 探针**）
+### C. 忙闲判定接第一手事实（P1，**先做 §0.2 探针**）—— **已落地（变更集 182）**
 
 **上游事实**：宿主知道得很细——运行中的 agent（含子代理、等待审批的回合）、排队消息、运行中/停止中的后台任务（`packages/jobs`）、已挂定时器（`schedule`）；官方桌面端的退出确认用的就是这套事实（`apps/desktop/README.zh.md`，走私有 IPC）。对 `web` 实例的官方通道：**已核实**（§0.2）——`session/list` 是**普通 unary 方法**，每条会话直接带 `running` 与 `agentAvailable`，无需流式。
+**语义已核实**（上游 `packages/core/agent-loop/src/agent.ts`）：agent 阶段只有 `idle`/`maintenance`/`running` 三种，审批等待发生在 step 内部 ⇒ **等审批时 `running` 仍为真**；子代理也是会话 ⇒ 也会计入。
 
-**启动器现状**：`InstanceIdleTracker.ShouldAutoStop`（`MainWindow.xaml.cs:748`）+ `ProcessQuery`（"进程树有到非回环地址的已建立连接"=忙）——启发式，会漏：等审批、消息排队、只有定时任务的实例都可能判成空闲。
+**启动器现状**：`InstanceIdleTracker.ShouldAutoStop` + `ProcessQuery`（"进程树有到非回环地址的已建立连接"=忙）——启发式，会漏：等审批、消息排队、只有定时任务的实例都可能判成空闲。
 
-**范围**：把"忙"的判据换成宿主事实（`session/list` ⇒ 任一会话 `running`；网络连接启发式降为兜底；§0.2 已核实通道可用），探针/客户端跑不通就整体不做。**范围外**：不做远程控制（不代发消息、不代批准）。
+**范围**：把"忙"的判据换成宿主事实（`session/list` ⇒ 任一会话 `running`；连接/CPU 启发式只在**拿不到事实时**兜底），探针/客户端跑不通就整体不做。**范围外**：不做远程控制（不代发消息、不代批准）。
 
-**成本/风险**：要引入仅 HTTP 的 RPC 客户端（分帧 + 鉴权 + 超时）；**失败必须回落**到现有启发式，否则会把忙实例当空闲。
+**成本/风险**：引入了仅 HTTP 的 RPC 客户端（握手换 cookie + unary POST + 超时 + 失败回落）。风险点（把忙实例当空闲）的三道措施：① 事实说忙 ⇒ 绝不停；② 只有拿不到事实才看连接/CPU 启发式；③ 事实保鲜期 45 秒，过期即当拿不到（不用过期事实下判断）。
+
+**落地物（变更集 182）**：`Services/DshRemoteApiClient.cs`（契约 C22 的客户端）、`Services/InstanceHostFactsService.cs`（事实解析/缓存/节流/原子刷新）、`InstanceIdleTracker.EvaluateAutoStop`（判定阶梯 + `AutoStopDecision`）、`MainWindow`（每轮探测按实例节流刷新；停止理由写明"凭什么说空闲"）、`ErrorCodes.E1020/E1021`。验证：SelfTest **241/0**（含本机假服务跑真实握手/信封/401 后重握手重试）、harness **408/0/0**（含一条**真起 dsh web** 的端到端门禁）+ 沙箱实例现场。
 
 ### D. 官方可选 bundle 开关（P2）
 

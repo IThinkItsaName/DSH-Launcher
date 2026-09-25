@@ -3100,6 +3100,260 @@ using (var catalogHandler = MarketplaceService.CreateHttpHandler())
         string.Join(",", bothSnapshot.ActiveTitles));
 }
 
+// ---------------------------------------------------------------------------
+// 宿主事实（变更集 182，计划 §C）：从 dsh 实例的 /api 读「有没有会话在跑」。
+//   通道契约 C22（docs/DSH_CONTRACT_INVENTORY.md）：
+//     握手  GET /?token=… → 303 + Set-Cookie dsh-auth-<authority>
+//     调用  POST /api/<命名空间>/<方法>
+//           体   {"type":"client-request","rpcId":…,"method":…,"payload":{"args":{…}}}
+//           响应 {"type":"server-response","rpcId":…,"result":{"ok":true,"value":…}}
+//   判定口径（用户 2026-09-25 拍板）：事实说忙 ⇒ 不停；事实说闲 ⇒ 就按闲算；
+//     拿不到事实（null）⇒ 回落连接/CPU 启发式；拿不到且启发式也干净 ⇒ 按空闲算。
+//   本段用本机假服务（localhost）跑**真实握手与调用**：不联网、不碰任何用户数据。
+// ---------------------------------------------------------------------------
+{
+    // ---- 纯函数 1：带 token 的实例地址解析（只认回环、必须有 token） ----
+    var parseOk = DshRemoteApiClient.TryParseAuthenticatedUrl(
+        "http://127.0.0.1:3080/?token=abc123", out var parsedAuthority, out var parsedUrl, out var parseReason);
+    var parseLocalhost = DshRemoteApiClient.TryParseAuthenticatedUrl(
+        "http://localhost:5000/?token=x", out _, out _, out _);
+    var parseRemote = DshRemoteApiClient.TryParseAuthenticatedUrl(
+        "http://10.0.0.5:3080/?token=abc", out _, out _, out var remoteReason);
+    var parseNoToken = DshRemoteApiClient.TryParseAuthenticatedUrl(
+        "http://127.0.0.1:3080/", out _, out _, out var noTokenReason);
+    Check("host-facts/地址解析：回环 + token 才可用（非回环一律拒）",
+        parseOk && parsedAuthority == "127.0.0.1:3080"
+        && parsedUrl.Host == "127.0.0.1" && parsedUrl.Query.Contains("token=abc123")
+        && parseLocalhost
+        && !parseRemote && remoteReason is not null
+        && !parseNoToken && noTokenReason is not null
+        && !DshRemoteApiClient.TryParseAuthenticatedUrl(null, out _, out _, out _)
+        && !DshRemoteApiClient.TryParseAuthenticatedUrl("not a url", out _, out _, out _),
+        $"ok={parseOk} localhost={parseLocalhost} remote={remoteReason} noToken={noTokenReason}");
+
+    // ---- 纯函数 2：请求体与响应信封 ----
+    var requestJson = DshRemoteApiClient.BuildRequestJson(
+        DshRemoteApiClient.SessionListEndpoint, "launcher-7", DshRemoteApiClient.SessionListArgsJson);
+    Check("host-facts/请求体形状：client-request 信封 + payload.args（会话列表参数名必须是 _request）",
+        requestJson == "{\"type\":\"client-request\",\"rpcId\":\"launcher-7\",\"method\":\"session/list\",\"payload\":{\"args\":{\"_request\":{}}}}",
+        requestJson);
+
+    var okEnvelope = DshRemoteApiClient.ParseResponse(
+        200,
+        "{\"type\":\"server-response\",\"rpcId\":\"r1\",\"result\":{\"ok\":true,\"value\":{\"items\":[{\"sessionId\":\"s1\",\"running\":true}]}}}");
+    var errorEnvelope = DshRemoteApiClient.ParseResponse(
+        200,
+        "{\"type\":\"server-response\",\"rpcId\":\"r1\",\"result\":{\"ok\":false,\"error\":{\"code\":\"gateway/arguments-invalid\",\"message\":\"args fields do not match\"}}}");
+    var parsedFacts = InstanceHostFactsParser.ParseSessionList(okEnvelope.Value);
+    Check("host-facts/响应信封：ok/value 可解析；ok=false 带 code/message；401/404/垃圾各有归类",
+        okEnvelope.IsOk && parsedFacts is { IsKnown: true, HostBusy: true, RunningCount: 1 }
+        && !errorEnvelope.IsOk && errorEnvelope.ErrorCode == "gateway/arguments-invalid"
+        && errorEnvelope.Status == DshRemoteApiStatus.Failed
+        && DshRemoteApiClient.ParseResponse(401, null).Status == DshRemoteApiStatus.Unauthorized
+        && DshRemoteApiClient.ParseResponse(404, "nf").Status == DshRemoteApiStatus.EndpointMissing
+        && DshRemoteApiClient.ParseResponse(200, "not json").Status == DshRemoteApiStatus.Failed,
+        $"ok={okEnvelope.Status} err={errorEnvelope.ErrorCode} facts={parsedFacts.SummaryText}");
+
+    var cookieOk = DshRemoteApiClient.TryExtractCookieHeader(
+        "dsh-auth-ABC=pay.load.sig; Path=/; HttpOnly; SameSite=Lax", out var cookieHeader);
+    Check("host-facts/Set-Cookie 只取「名=值」（丢掉属性）；空/非法一律不可用",
+        cookieOk && cookieHeader == "dsh-auth-ABC=pay.load.sig"
+        && !DshRemoteApiClient.TryExtractCookieHeader(null, out _)
+        && !DshRemoteApiClient.TryExtractCookieHeader("dsh-auth-ABC", out _),
+        cookieHeader);
+
+    // ---- 事实缓存：TTL / 节流 / 忘记 ----
+    using (var factsCache = new InstanceHostFactsService())
+    {
+        var cacheNow = DateTimeOffset.UtcNow;
+        var busyFacts = new InstanceHostFacts(true, 2, 1, 2, new[] { "s1" }, null);
+        Check("host-facts/缓存：无记录就该刷新，存进去就没到点",
+            factsCache.ShouldRefresh("i1", cacheNow) && factsCache.ResolveHostBusy("i1", cacheNow) is null,
+            $"refresh={factsCache.ShouldRefresh("i1", cacheNow)}");
+        factsCache.Store("i1", busyFacts, cacheNow);
+        factsCache.Store("i2", InstanceHostFacts.Unknown("session/list 连不上"), cacheNow);
+        var afterStore = cacheNow.AddSeconds(5);
+        Check("host-facts/缓存：保鲜期内给出 true/false；不可用的事实一律给出 null（回落启发式）",
+            factsCache.ResolveHostBusy("i1", afterStore) == true
+            && factsCache.ResolveHostBusy("i2", afterStore) is null
+            && !factsCache.ShouldRefresh("i1", afterStore)
+            && factsCache.ShouldRefresh("i1", cacheNow + InstanceHostFactsService.RefreshInterval)
+            && factsCache.ResolveHostBusy("i1", cacheNow + InstanceHostFactsService.MaxAge + TimeSpan.FromSeconds(1)) is null,
+            $"i1={factsCache.ResolveHostBusy("i1", afterStore)} i2={factsCache.ResolveHostBusy("i2", afterStore)}");
+        factsCache.Forget("i1");
+        Check("host-facts/忘记：实例停了就不再给出旧事实（下次重新握手）",
+            factsCache.ResolveHostBusy("i1", afterStore) is null && factsCache.GetLast("i1") is null);
+
+        // 变更集 182 现场发现：曾经用“查询中”占位 → 日志把“正在查”当成“事实不可用”，
+        // 于是每轮都记 E1020。现在改成 in-flight 状态，且不再产生任何“假事实”。
+        var beginNow = DateTimeOffset.UtcNow;
+        var began = factsCache.TryBeginRefresh("i3", beginNow);
+        var second = factsCache.TryBeginRefresh("i3", beginNow);
+        Check("host-facts/刷新是原子的（在飞时不再发起，也不写“查询中”占位）",
+            began && !second && factsCache.IsInFlight("i3")
+            && !factsCache.ShouldRefresh("i3", beginNow)
+            && factsCache.ResolveHostBusy("i3", beginNow) is null
+            && factsCache.GetLast("i3") is null,
+            $"began={began} second={second} inFlight={factsCache.IsInFlight("i3")}");
+        factsCache.EndRefresh("i3");
+        Check("host-facts/刷新收尾后可以再发（否则该实例永远不会再刷新）",
+            !factsCache.IsInFlight("i3") && factsCache.ShouldRefresh("i3", beginNow));
+
+        // 失败也有事实记录（带原因）→ 日志才能说清“为什么回落到了启发式”。
+        factsCache.Store("i4", InstanceHostFacts.Unknown("session/list 超时"), beginNow);
+        Check("host-facts/失败会写成“不可用 + 原因”（日志用它解释回落）",
+            factsCache.GetLast("i4") is { IsKnown: false, Reason: "session/list 超时" }
+            && factsCache.ResolveHostBusy("i4", beginNow) is null);
+    }
+
+    // ---- 判定阶梯（纯函数） ----
+    // 用“很久以前的活动”让空闲条件成立，好让阶梯里“停不停”只看假动作与事实。
+    var ladderIdleActivity = new InstanceActivity("会话写入", DateTimeOffset.UtcNow.AddHours(-1));
+    var ladderFreshActivity = new InstanceActivity("会话写入", DateTimeOffset.UtcNow);
+    var ladderNow = DateTimeOffset.UtcNow;
+    Check("host-facts/判定阶梯：事实忙⇒不停；事实闲⇒启发式不再参与；拿不到⇒回落启发式",
+        InstanceIdleTracker.EvaluateAutoStop(true, true, false, false, true, ladderFreshActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.HostBusy
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, false, true, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.Stop
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, false, false, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.Stop
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, false, true, null, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.HeuristicBusy
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, false, false, null, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.Stop
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, false, false, false, ladderFreshActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.NotIdle
+        && InstanceIdleTracker.EvaluateAutoStop(false, true, false, false, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.Disabled
+        && InstanceIdleTracker.EvaluateAutoStop(true, false, false, false, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.NotManaged
+        && InstanceIdleTracker.EvaluateAutoStop(true, true, true, false, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow) == AutoStopDecision.LauncherBusy,
+        $"ladder={InstanceIdleTracker.EvaluateAutoStop(true, true, false, true, false, ladderIdleActivity, TimeSpan.FromMinutes(5), ladderNow)}");
+
+    Check("host-facts/停止原因里写清“凭什么说空闲”（宿主事实 vs 启发式）",
+        InstanceIdleTracker.DescribeBusySource(false) == "宿主报告无会话运行"
+        && InstanceIdleTracker.DescribeBusySource(true) == "宿主报告仍有会话在跑"
+        && InstanceIdleTracker.DescribeBusySource(null).Contains("启发式"),
+        InstanceIdleTracker.DescribeBusySource(false));
+
+    // ---- 假服务：真实握手 + 真实调用（含 401 后自动重握手重试） ----
+    var probeListener = new System.Net.HttpListener();
+    var probePort = 0;
+    var portProbe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    portProbe.Start();
+    probePort = ((System.Net.IPEndPoint)portProbe.LocalEndpoint).Port;
+    portProbe.Stop();
+    var fakePrefix = $"http://localhost:{probePort}/";
+    probeListener.Prefixes.Add(fakePrefix);
+    var received = new List<string>();
+    var sessionListFailures = 0;
+    try
+    {
+        probeListener.Start();
+        var serverLoop = Task.Run(async () =>
+        {
+            while (probeListener.IsListening)
+            {
+                System.Net.HttpListenerContext context;
+                try
+                {
+                    context = await probeListener.GetContextAsync();
+                }
+                catch (Exception)
+                {
+                    return;
+                }
+
+                var path = context.Request.Url!.AbsolutePath;
+                var body = string.Empty;
+                if (context.Request.HasEntityBody)
+                {
+                    using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
+                    body = await reader.ReadToEndAsync();
+                }
+
+                var cookie = context.Request.Headers["Cookie"] ?? "<无>";
+                received.Add($"{context.Request.HttpMethod} {path} cookie={cookie} token={(context.Request.Url.Query.Contains("token=") ? "有" : "无")} body={body}");
+
+                if (path == "/")
+                {
+                    context.Response.StatusCode = 303;
+                    context.Response.Headers["Set-Cookie"] = "dsh-auth-FAKE=signed.payload; Path=/; HttpOnly";
+                    context.Response.Close();
+                    continue;
+                }
+
+                if (path == "/api/session/list")
+                {
+                    // 头一次故意回 401：验证客户端会重握手后重试（而不是把失败直接当事实）。
+                    sessionListFailures++;
+                    if (sessionListFailures == 1)
+                    {
+                        context.Response.StatusCode = 401;
+                        context.Response.Close();
+                        continue;
+                    }
+
+                    var payload = Encoding.UTF8.GetBytes(
+                        "{\"type\":\"server-response\",\"rpcId\":\"r1\",\"result\":{\"ok\":true,\"value\":{\"items\":[{\"sessionId\":\"s1\",\"running\":true,\"agentAvailable\":true},{\"sessionId\":\"s2\",\"running\":false,\"agentAvailable\":false}]}}}");
+                    context.Response.StatusCode = 200;
+                    context.Response.ContentType = "application/json";
+                    context.Response.ContentLength64 = payload.Length;
+                    context.Response.OutputStream.Write(payload, 0, payload.Length);
+                    context.Response.Close();
+                    continue;
+                }
+
+                context.Response.StatusCode = 404;
+                context.Response.Close();
+            }
+        });
+
+        using var client = DshRemoteApiClient.TryCreate($"{fakePrefix}?token=fake-token", TimeSpan.FromSeconds(5));
+        var callResponse = client is null
+            ? new DshRemoteApiResponse(DshRemoteApiStatus.Failed, null, null, null, "客户端构造失败")
+            : client.GetSessionListAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var callFacts = callResponse.IsOk ? InstanceHostFactsParser.ParseSessionList(callResponse.Value) : null;
+        probeListener.Stop();
+        serverLoop.Wait(TimeSpan.FromSeconds(5));
+
+        var handshakeLines = received.Where(line => line.Contains("GET / ")).ToList();
+        var callLines = received.Where(line => line.Contains("POST /api/session/list")).ToList();
+        Check("host-facts/真实握手 + 调用：GET /?token=… 换 cookie；POST 带 cookie 与信封；401 后重握手重试",
+            callResponse.IsOk && callFacts is { IsKnown: true, HostBusy: true, SessionCount: 2, RunningCount: 1 }
+            && handshakeLines.Count == 2 && handshakeLines[0].Contains("token=有")
+            && callLines.Count == 2
+            && callLines[0].Contains("cookie=dsh-auth-FAKE=signed.payload")
+            && callLines[0].Contains("\"payload\":{\"args\":{\"_request\":{}}}")
+            && callLines[1].Contains("cookie=dsh-auth-FAKE=signed.payload")
+            && received.IndexOf(handshakeLines[1]) < received.IndexOf(callLines[1]),
+            $"handshakes={handshakeLines.Count} calls={callLines.Count} last=[{callLines[^1]}]");
+    }
+    finally
+    {
+        probeListener.Close();
+    }
+
+    // ---- 连不上也不能抛（只会给“拿不到”） ----
+    using (var deadClient = DshRemoteApiClient.TryCreate("http://127.0.0.1:9/?token=x", TimeSpan.FromSeconds(2)))
+    {
+        var deadResponse = deadClient is null
+            ? new DshRemoteApiResponse(DshRemoteApiStatus.Failed, null, null, null, "客户端构造失败")
+            : deadClient.GetSessionListAsync(CancellationToken.None).GetAwaiter().GetResult();
+        Check("host-facts/连不上：归为 Unreachable/Timeout（不抛异常、不把失败当事实）",
+            deadResponse.Status is DshRemoteApiStatus.Unreachable or DshRemoteApiStatus.Timeout,
+            $"status={deadResponse.Status} detail={deadResponse.Detail}");
+    }
+
+    using (var deadService = new InstanceHostFactsService())
+    {
+        var deadFacts = deadService.RefreshAsync(
+                "dead", "http://127.0.0.1:9/?token=x", DateTimeOffset.UtcNow, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var noUrlFacts = deadService.RefreshAsync(
+                "nourl", null, DateTimeOffset.UtcNow, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Check("host-facts/服务层：拿不到就写“不可用”（含原因），判定侧得到 null",
+            deadFacts is { IsKnown: false } && deadFacts.Reason is not null
+            && noUrlFacts is { IsKnown: false }
+            && deadService.ResolveHostBusy("dead", DateTimeOffset.UtcNow) is null,
+            $"dead={deadFacts.Reason} nourl={noUrlFacts.Reason}");
+    }
+}
+
 try
 {
     Directory.Delete(scratch, recursive: true);
