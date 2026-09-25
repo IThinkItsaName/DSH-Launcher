@@ -16,15 +16,24 @@
 | C14/C15/C16 安全体检键位 / 环境变量 / 遥测域 | `packages/bundle/base/cordis.patch.yml` 中仍在 |
 | `llm-deepseek` 设置命名空间 | 该行 `id:` **仍是 `llm-deepseek`**（只把包名换成 `dsh-llm-deepseek-api-key`）⇒ `ModelService` 写 `settings.yaml` 的 `llm-deepseek:` 段仍有效 |
 
-### 0.2 共同前置：Remote/HTTP 通道探针（做一次，决定 B/C/D 的形态）
+### 0.2 共同前置：Remote/HTTP 通道探针（**已做，2026-09-25；结论：通**）
 
-上游客户端与宿主之间走 `API_PATH = '/api'`（`packages/client/connection/src/api-path.ts`），业务方法以 `@Remote` / `@RemoteScope` 暴露（`docs/api-gateway.md`）。启动器**已经**能从 `dsh web:` 行拿到带 token 的 URL。
+上游客户端与宿主之间走 `API_PATH = '/api'`（`packages/client/connection/src/api-path.ts`），业务方法以 `@Remote` / `@RemoteScope` 暴露（`docs/api-gateway.md`）。
 
-| 要核实的 | 影响 |
+**探针**：`_verify-p0/func-check/probe-api-remote.ps1`（实现 `func-check/api-remote-probe/`，C#；自带临时沙箱 `DSH_HOME`，只调 list 类方法 + 沙箱内建一个会话；`RESULT: PASS`，日志 `_verify-p0/logs/api-remote-probe.txt`）。
+
+已核实（游源码 + 沙箱实例实测，运行时 `0.1.7-rc.2`）：
+
+| 要核实的 | 结论 |
 |---|---|
-| 握手（`/api` 上的 RPC 分帧与鉴权头）、只读事实方法是否对 `web` 实例可用、有无流式要求 | **通** ⇒ B/D 优先走官方接口（如 `listBundles`），C 可落地；**不通** ⇒ B/D 退回文件级（`compatibility.json` / profile `package.json`），C 留待定 |
+| 握手（`/api` 上的 RPC 分帧与鉴权头） | `GET /?token=<launchToken>`（就是 `dsh web:` 行里那个 URL）→ **303** + `Set-Cookie: dsh-auth-<authority 哈希>=<签名票据>`；之后 `POST /api/<命名空间>/<方法>`，体为 `{"type":"client-request","rpcId":…,"method":"<ns>/<方法>","payload":{"args":{…}}}`，带该 cookie。响应 = `{"type":"server-response","rpcId":…,"result":{"ok":true,"value":…}}`，失败为 `result.error={code,message,details}`；Content-Type `application/json` |
+| 鉴权是否必要 | **必要**：不带 cookie ⇒ **401 unauthorized**（回环地址也不行；启动器得先做 token→cookie 换发）；`Host` 不是本机/未登记 ⇒ **403**（DNS rebinding 防护） |
+| 只读事实方法是否对 `web` 实例可用 | **可用**：`session/list`（每条会话直接带 `running` / `agentAvailable`）、`pluginManager/listBundles`、`pluginManager/listVersionExemptions` |
+| 有无流式要求 | 普通 POST 调流式方法（`session/control`、`job/list`）⇒ `gateway/signature-invalid`「stream Remote methods must be opened through the stream carrier」⇒ 流式要开 `/api/remote.mux` WebSocket。**C/D 都只用 unary，不需要** |
+| 参数形状 | **极严**：`args` 字段名必须与 Remote 描述符一致（`session/list` 要 `_request`、`job/list` 要 `request`），否则 `gateway/arguments-invalid`（业务代码不会被执行） |
+| 版本差异（额外发现） | `pluginManager/listVersionExemptions` **rc.2 有、`0.1.7-alpha.2` 上 404**；可选 bundle 也少一个（alpha.2 只有 2 个）⇒ 官方豁免接口是**新版本才有**，启动器不能假设它在 |
 
-手段：沙箱实例 + `dsh web` 的**只读**探针（不动用户真实数据；未获许可不做带鉴权探测）。
+结论：**通** ⇒ **C** 用 `session/list` 的 `running` 作为"忙"的第一手事实（网络连接启发式降为兜底）；**D** 走 `pluginManager/listBundles` + `setBundleEnabled`（官方接口，而不是自己写 profile `package.json`）；**B** 维持"走上游 CLI + 文件只读"（因为官方豁免接口在旧运行时上没有，见上表末行）。启动器侧新增"仅 HTTP 的 RPC 客户端（token→cookie + unary POST + 超时 + 失败回落）"，按 §0.3⑤ 挂号为契约 **C22**。
 
 ### 0.3 落地通则（每项都要走）
 
@@ -83,11 +92,11 @@
 
 ### C. 忙闲判定接第一手事实（P1，**先做 §0.2 探针**）
 
-**上游事实**：宿主知道得很细——运行中的 agent（含子代理、等待审批的回合）、排队消息、运行中/停止中的后台任务（`packages/jobs`）、已挂定时器（`schedule`）；官方桌面端的退出确认用的就是这套事实（`apps/desktop/README.zh.md`，走私有 IPC）。对 `web` 实例理论上有对应的 Remote 方法，**但我尚未核实**（这就是 §0.2 探针要先做的事）。
+**上游事实**：宿主知道得很细——运行中的 agent（含子代理、等待审批的回合）、排队消息、运行中/停止中的后台任务（`packages/jobs`）、已挂定时器（`schedule`）；官方桌面端的退出确认用的就是这套事实（`apps/desktop/README.zh.md`，走私有 IPC）。对 `web` 实例的官方通道：**已核实**（§0.2）——`session/list` 是**普通 unary 方法**，每条会话直接带 `running` 与 `agentAvailable`，无需流式。
 
 **启动器现状**：`InstanceIdleTracker.ShouldAutoStop`（`MainWindow.xaml.cs:748`）+ `ProcessQuery`（"进程树有到非回环地址的已建立连接"=忙）——启发式，会漏：等审批、消息排队、只有定时任务的实例都可能判成空闲。
 
-**范围**：探针通过后，把"忙"的判据换成宿主事实，网络连接启发式降为兜底；探针不通就不做。**范围外**：不做远程控制（不代发消息、不代批准）。
+**范围**：把"忙"的判据换成宿主事实（`session/list` ⇒ 任一会话 `running`；网络连接启发式降为兜底；§0.2 已核实通道可用），探针/客户端跑不通就整体不做。**范围外**：不做远程控制（不代发消息、不代批准）。
 
 **成本/风险**：要引入仅 HTTP 的 RPC 客户端（分帧 + 鉴权 + 超时）；**失败必须回落**到现有启发式，否则会把忙实例当空闲。
 
@@ -97,7 +106,7 @@
 
 **启动器现状**：无认知（只有市场分类字符串 `"voice"`）；但 `DshProfileService` / `ExtensionService` 已在读写 `dsh.profile.bundles` ⇒ 有现成落点。
 
-**范围**：在插件/扩展页把这三个列成"官方可选能力（默认关）"，显示本地化名称与说明、可开关；**不**把非官方 provider 运行时（语音/浏览器操作/电脑操作）自动塞进安装。
+**范围**：在插件/扩展页把这三个列成"官方可选能力（默认关）"，显示本地化名称与说明、可开关；读写**走上游官方接口**（`pluginManager/listBundles` + `setBundleEnabled`，§0.2 已实测可用）——而不是自己写 profile `package.json`；**不**把非官方 provider 运行时（语音/浏览器操作/电脑操作）自动塞进安装。
 
 **验证**：SelfTest（列表读写 + 开关后 profile JSON 断言）+ 真机开关一次，与 dsh 侧 `listBundles` 的 `enabled` 对齐。
 
