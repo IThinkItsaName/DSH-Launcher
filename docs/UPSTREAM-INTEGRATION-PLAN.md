@@ -107,7 +107,7 @@
 
 | # | 能力 | 上游落点 | 为何待定 | 重启条件 |
 |---|---|---|---|---|
-| E | 账号态与额度（双 provider、`ACCOUNT_QUOTA`、退出登录、内嵌充值页） | `packages/llm/llm-deepseek-account`、`llm-deepseek-api-key`、`packages/credentials/deepseek-account-platform` | 与启动器"只读 API key 查余额"（`BalanceService`）口径冲突；账号态涉及凭据与计费 | 先定"启动器是否展示账号态"的产品口径 |
+| E | 账号态与额度（双 provider、`ACCOUNT_QUOTA`、退出登录、内嵌充值页） | `packages/llm/llm-deepseek-account`、`llm-deepseek-api-key`、`packages/credentials/deepseek-account-platform` | 与启动器"只读 API key 查余额"（`BalanceService`）口径冲突；账号态涉及凭据与计费 | **已定（2026-09-25，用户口径）：不做**——账号相关能力不往启动器里做，见 §3.5；`BalanceService` 的只读 API key 查余额不受影响 |
 | F | SDK / ACP 自动化实例 | `packages/sdk/**`、`packages/acp/**`、`dsh --profile sdk\|acp` | 启动器现**明确拒绝**启动无界面 profile；要新增实例类型与协议实现 | 出现"无界面跑任务并回收结果/通知"的需求 |
 | G | 官方桌面端协同/共存 | `apps/desktop`、`apps/desktop-host`（端口 19387、独占 `profiles/desktop`、内置 Node/Python/pnpm） | 上游明确"CLI 不能启动或修改 `profiles/desktop`"；启动器 `DeepSeekDesktopDetector` 已能探测其安装根 | 用户同时用官方桌面端与启动器，需要互斥检测或共用运行时 |
 | H | pnpm/npm 有界运行口径（静默上界、杀进程树、被终止的运行不启用半成品 manifest） | `bounded-pnpm-runs` 决策 + `plugin-manager` 实现 | 属启动器自建流程（版本安装/插件安装/源码构建），与本次 175 同源但不是同一处 | 再出现"安装卡住/锁不放"的真实现场 |
@@ -133,6 +133,7 @@
 2. 把 dsh 的 Web UI / 插件页当 API 抓屏（Remote 接口是另一条正规通道，见 §0.2）。
 3. 写 `schedule` 存储，或自建提醒引擎（只读 + 防呆即可覆盖需求）。
 4. 依赖未文档化的内部文件却不降级：`storages/*`、`compatibility.json` 一律按"读不到 = 未知"处理。
+5. **账号相关能力（账号态、额度点数、退出登录、内嵌充值页）**。用户口径（2026-09-25）：不往启动器里做；`BalanceService` 现有的"只用 API key 只读查余额"不属此列，保持现状。
 
 ## 4. 建议顺序
 
